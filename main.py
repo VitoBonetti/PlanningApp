@@ -68,10 +68,9 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     return {"access_token": access_token, "token_type": "bearer", "role": user[3], "name": user[4]}
 
 
-class UserCreateSecure(
-    BaseModel): username: str; password: str; name: str; role: str; location: str; base_capacity: float = 1.0
-class EventCreate(BaseModel): user_id: Optional[int] = None; event_type: str; location: Optional[
-    str] = None; start_date: str; end_date: str
+class UserCreateSecure(BaseModel): username: str; password: str; name: str; role: str; location: str; base_capacity: float = 1.0
+class EventCreate(BaseModel): user_id: Optional[int] = None; event_type: str; location: Optional[str] = None; start_date: str; end_date: str
+class EventUpdate(BaseModel): user_id: Optional[int] = None; event_type: str; location: Optional[str] = None; start_date: str; end_date: str;
 class TestCreate(BaseModel): name: str; service_id: int; type: str; credits_per_week: float; duration_weeks: int
 class TestUpdate(BaseModel): name: str; service_id: int; credits_per_week: float;  duration_weeks: int
 class TestSchedule(BaseModel): start_week: Optional[int]; start_year: Optional[int]
@@ -94,9 +93,7 @@ def calculate_weekly_capacity(user_id, year, week_number):
     if not user_data: return 0.0
     base_cap, user_location = user_data
 
-    cursor.execute(
-        "SELECT start_date, end_date FROM events WHERE user_id = ? OR (event_type = 'national_holiday' AND location = ?)",
-        (user_id, user_location))
+    cursor.execute("SELECT start_date, end_date FROM events WHERE user_id = ? OR (event_type = 'national_holiday' AND (location = ? OR location = 'Global'))", (user_id, user_location))
     events = cursor.fetchall()
 
     week_dates = []
@@ -166,6 +163,23 @@ def create_event(e: EventCreate, current_user: dict = Depends(get_current_user))
     return {"status": "ok"}
 
 
+@app.put("/events/{event_id}")
+def update_event(event_id: int, e: EventUpdate, current_user: dict = Depends(get_current_user)):
+    if e.event_type == 'national_holiday': e.user_id = None
+    conn = sqlite3.connect(DB_FILE); c = conn.cursor()
+    c.execute('UPDATE events SET user_id=?, event_type=?, location=?, start_date=?, end_date=? WHERE id=?', (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
+    conn.commit(); conn.close()
+    return {"message": "Holiday updated"}
+
+
+# NEW: Delete a holiday
+@app.delete("/events/{event_id}")
+def delete_event(event_id: int, current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_FILE); c = conn.cursor()
+    c.execute('DELETE FROM events WHERE id=?', (event_id,))
+    conn.commit(); conn.close()
+    return {"message": "Holiday deleted"}
+
 @app.post("/tests/")
 def create_test(t: TestCreate, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE);
@@ -199,6 +213,37 @@ def unschedule_test(test_id: int, current_user: dict = Depends(get_current_user)
     return {"message": "Unscheduled"}
 
 
+@app.delete("/tests/{test_id}")
+def delete_test(test_id: int, current_user: dict = Depends(get_current_user)):
+    if current_user['role'] not in ['admin', 'manager']:
+        raise HTTPException(status_code=403, detail="Only Admins/Managers can delete tests.")
+    conn = sqlite3.connect(DB_FILE); cursor = conn.cursor()
+    # Must delete assignments first due to relational links!
+    cursor.execute('DELETE FROM assignments WHERE test_id = ?', (test_id,))
+    cursor.execute('DELETE FROM tests WHERE id = ?', (test_id,))
+    conn.commit(); conn.close()
+    return {"message": "Test permanently deleted."}
+
+
+@app.put("/tests/{test_id}")
+def update_test(test_id: int, t: TestUpdate, current_user: dict = Depends(get_current_user)):
+    if current_user['role'] not in ['admin', 'manager']:
+        raise HTTPException(status_code=403, detail="Only Admins/Managers can edit tests.")
+
+    conn = sqlite3.connect(DB_FILE);
+    cursor = conn.cursor()
+    cursor.execute('''
+                   UPDATE tests
+                   SET name             = ?,
+                       service_id       = ?,
+                       credits_per_week = ?,
+                       duration_weeks   = ?
+                   WHERE id = ?
+                   ''', (t.name, t.service_id, t.credits_per_week, t.duration_weeks, test_id))
+    conn.commit();
+    conn.close()
+    return {"message": "Test updated successfully."}
+
 @app.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE);
@@ -214,9 +259,7 @@ def create_assignment(assign: AssignmentCreate, current_user: dict = Depends(get
     # NEW RULE: Calculate actual capacity to assign (base minus holidays)
     cursor.execute('SELECT base_capacity, location FROM users WHERE id = ?', (assign.user_id,))
     base_cap, user_location = cursor.fetchone()
-    cursor.execute(
-        "SELECT start_date, end_date FROM events WHERE user_id = ? OR (event_type = 'national_holiday' AND location = ?)",
-        (assign.user_id, user_location))
+    cursor.execute("SELECT start_date, end_date FROM events WHERE user_id = ? OR (event_type = 'national_holiday' AND (location = ? OR location = 'Global'))", (assign.user_id, user_location))
     events = cursor.fetchall()
 
     week_dates = []
@@ -308,37 +351,6 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
         "assignments": assignments,
         "events": events  # <-- Added to the payload!
     }
-
-@app.delete("/tests/{test_id}")
-def delete_test(test_id: int, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
-        raise HTTPException(status_code=403, detail="Only Admins/Managers can delete tests.")
-    conn = sqlite3.connect(DB_FILE); cursor = conn.cursor()
-    # Must delete assignments first due to relational links!
-    cursor.execute('DELETE FROM assignments WHERE test_id = ?', (test_id,))
-    cursor.execute('DELETE FROM tests WHERE id = ?', (test_id,))
-    conn.commit(); conn.close()
-    return {"message": "Test permanently deleted."}
-
-
-@app.put("/tests/{test_id}")
-def update_test(test_id: int, t: TestUpdate, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
-        raise HTTPException(status_code=403, detail="Only Admins/Managers can edit tests.")
-
-    conn = sqlite3.connect(DB_FILE);
-    cursor = conn.cursor()
-    cursor.execute('''
-                   UPDATE tests
-                   SET name             = ?,
-                       service_id       = ?,
-                       credits_per_week = ?,
-                       duration_weeks   = ?
-                   WHERE id = ?
-                   ''', (t.name, t.service_id, t.credits_per_week, t.duration_weeks, test_id))
-    conn.commit();
-    conn.close()
-    return {"message": "Test updated successfully."}
 
 
 @app.delete("/system/wipe")
