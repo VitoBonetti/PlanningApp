@@ -297,3 +297,4 @@ cython_debug/
 seed_api.py
 pentest_planner.db
 /add_blackbox.py
+/planner_v2.db
