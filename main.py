@@ -70,18 +70,11 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
 
 class UserCreateSecure(
     BaseModel): username: str; password: str; name: str; role: str; location: str; base_capacity: float = 1.0
-
-
 class EventCreate(BaseModel): user_id: Optional[int] = None; event_type: str; location: Optional[
     str] = None; start_date: str; end_date: str
-
-
 class TestCreate(BaseModel): name: str; service_id: int; type: str; credits_per_week: float; duration_weeks: int
-
-
+class TestUpdate(BaseModel): name: str; service_id: int; credits_per_week: float;  duration_weeks: int
 class TestSchedule(BaseModel): start_week: Optional[int]; start_year: Optional[int]
-
-
 class AssignmentCreate(BaseModel): test_id: int; user_id: int; week_number: int; year: int; allocated_credits: float
 
 
@@ -327,7 +320,27 @@ def delete_test(test_id: int, current_user: dict = Depends(get_current_user)):
     conn.commit(); conn.close()
     return {"message": "Test permanently deleted."}
 
-# NEW: The "Soft Factory Reset" (Clears the board, keeps the users)
+
+@app.put("/tests/{test_id}")
+def update_test(test_id: int, t: TestUpdate, current_user: dict = Depends(get_current_user)):
+    if current_user['role'] not in ['admin', 'manager']:
+        raise HTTPException(status_code=403, detail="Only Admins/Managers can edit tests.")
+
+    conn = sqlite3.connect(DB_FILE);
+    cursor = conn.cursor()
+    cursor.execute('''
+                   UPDATE tests
+                   SET name             = ?,
+                       service_id       = ?,
+                       credits_per_week = ?,
+                       duration_weeks   = ?
+                   WHERE id = ?
+                   ''', (t.name, t.service_id, t.credits_per_week, t.duration_weeks, test_id))
+    conn.commit();
+    conn.close()
+    return {"message": "Test updated successfully."}
+
+
 @app.delete("/system/wipe")
 def wipe_system(current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin':
