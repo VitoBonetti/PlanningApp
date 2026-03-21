@@ -43,6 +43,18 @@ def init_asset_tables():
 
 init_asset_tables()
 
+def upgrade_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN start_week INTEGER DEFAULT 1")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists!
+    conn.close()
+
+upgrade_db()
+
 app = FastAPI(title="Pentest Planner API - PRO")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"],
                    allow_headers=["*"])
@@ -105,6 +117,7 @@ class UserCreateSecure(BaseModel):
     role: str
     location: str
     base_capacity: float = 1.0
+    start_week: int = 1
 
 class EventCreate(BaseModel):
     user_id: Optional[str] = None
@@ -158,12 +171,26 @@ def get_quarter_weeks(q: int):
 def calculate_weekly_capacity(user_id, year, week_number):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute('SELECT base_capacity, location FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT base_capacity, location, start_week FROM users WHERE id = ?', (user_id,))
     user_data = cursor.fetchone()
     if not user_data: return 0.0
-    base_cap, user_location = user_data
+    base_cap, user_location, start_week = user_data
 
-    cursor.execute("SELECT start_date, end_date FROM events WHERE user_id = ? OR (event_type = 'national_holiday' AND (location = ? OR location = 'Global'))", (user_id, user_location))
+    # Safe fallback just in case old users have NULL
+    if start_week is None: start_week = 1
+
+    # THE MAGIC LOCK: If the week we are checking is before they joined, their capacity is 0!
+    if week_number < start_week:
+        return 0.0
+
+    # NEW: Added 'team_day' to the SQL query so it affects everyone!
+    cursor.execute("""
+                   SELECT start_date, end_date
+                   FROM events
+                   WHERE user_id = ?
+                      OR (event_type = 'national_holiday' AND (location = ? OR location = 'Global'))
+                      OR event_type = 'team_day'
+                   """, (user_id, user_location))
     events = cursor.fetchall()
 
     week_dates = []
@@ -198,9 +225,10 @@ def create_user(u: UserCreateSecure, current_user: dict = Depends(get_current_us
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
+        # NEW: Added start_week
         cursor.execute(
-            'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (new_id, u.username, hashed_pw, u.name, u.role, u.location, u.base_capacity))
+            'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (new_id, u.username, hashed_pw, u.name, u.role, u.location, u.base_capacity, u.start_week))
         conn.commit()
         conn.close()
         return {"message": f"User {u.name} created."}
@@ -341,7 +369,10 @@ def get_available_assets(current_user: dict = Depends(get_current_user)):
 
 @app.post("/events/")
 def create_event(e: EventCreate, current_user: dict = Depends(get_current_user)):
-    if e.event_type == 'national_holiday': e.user_id = None
+    if e.event_type in ['national_holiday', 'team_day']:
+        e.user_id = None
+    if e.event_type == 'team_day':
+        e.location = 'Global'
     new_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -354,7 +385,10 @@ def create_event(e: EventCreate, current_user: dict = Depends(get_current_user))
 
 @app.put("/events/{event_id}")
 def update_event(event_id: str, e: EventUpdate, current_user: dict = Depends(get_current_user)):
-    if e.event_type == 'national_holiday': e.user_id = None
+    if e.event_type in ['national_holiday', 'team_day']:
+        e.user_id = None
+    if e.event_type == 'team_day':
+        e.location = 'Global'
     conn = sqlite3.connect(DB_FILE); c = conn.cursor()
     c.execute('UPDATE events SET user_id=?, event_type=?, location=?, start_date=?, end_date=? WHERE id=?', (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
     conn.commit(); conn.close()
