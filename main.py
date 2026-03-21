@@ -16,44 +16,171 @@ SECRET_KEY = "your-super-secret-production-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120
 
-def init_asset_tables():
+
+def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Table for the raw assets imported from Excel
-    c.execute('''CREATE TABLE IF NOT EXISTS assets (
-                    id TEXT PRIMARY KEY, 
-                    inventory_id TEXT, 
-                    ext_id TEXT, 
-                    number TEXT, 
-                    name TEXT, 
-                    market TEXT, 
-                    gost_service TEXT,
-                    is_assigned BOOLEAN DEFAULT 0,
-                    UNIQUE(inventory_id, ext_id, number)
-                )''')
-    # Junction table linking multiple assets to a single test
-    c.execute('''CREATE TABLE IF NOT EXISTS test_assets (
-                    test_id TEXT, 
-                    asset_id TEXT,
-                    FOREIGN KEY(test_id) REFERENCES tests(id),
-                    FOREIGN KEY(asset_id) REFERENCES assets(id)
-                )''')
+
+    # Core Tables
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (
+                     id
+                     TEXT
+                     PRIMARY
+                     KEY,
+                     username
+                     TEXT
+                     UNIQUE,
+                     hashed_password
+                     TEXT,
+                     name
+                     TEXT,
+                     role
+                     TEXT,
+                     location
+                     TEXT,
+                     base_capacity
+                     REAL,
+                     start_week
+                     INTEGER
+                     DEFAULT
+                     1
+                 )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS services
+                 (
+                     id
+                     TEXT
+                     PRIMARY
+                     KEY,
+                     name
+                     TEXT,
+                     max_concurrent_per_week
+                     INTEGER
+                 )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS tests
+                 (
+                     id
+                     TEXT
+                     PRIMARY
+                     KEY,
+                     name
+                     TEXT,
+                     service_id
+                     TEXT,
+                     type
+                     TEXT,
+                     credits_per_week
+                     REAL,
+                     duration_weeks
+                     REAL,
+                     start_week
+                     INTEGER,
+                     start_year
+                     INTEGER,
+                     status
+                     TEXT
+                     DEFAULT
+                     'Not Planned'
+                 )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS events
+                 (
+                     id
+                     TEXT
+                     PRIMARY
+                     KEY,
+                     user_id
+                     TEXT,
+                     event_type
+                     TEXT,
+                     location
+                     TEXT,
+                     start_date
+                     TEXT,
+                     end_date
+                     TEXT
+                 )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS assignments
+                 (
+                     id
+                     TEXT
+                     PRIMARY
+                     KEY,
+                     test_id
+                     TEXT,
+                     user_id
+                     TEXT,
+                     week_number
+                     INTEGER,
+                     year
+                     INTEGER,
+                     allocated_credits
+                     REAL
+                 )''')
+
+    # Asset Tables
+    c.execute('''CREATE TABLE IF NOT EXISTS assets
+    (
+        id
+        TEXT
+        PRIMARY
+        KEY,
+        inventory_id
+        TEXT,
+        ext_id
+        TEXT,
+        number
+        TEXT,
+        name
+        TEXT,
+        market
+        TEXT,
+        gost_service
+        TEXT,
+        is_assigned
+        BOOLEAN
+        DEFAULT
+        0,
+        UNIQUE
+                 (
+        inventory_id,
+        ext_id,
+        number
+                 ))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS test_assets
+    (
+        test_id
+        TEXT,
+        asset_id
+        TEXT,
+        FOREIGN
+        KEY
+                 (
+        test_id
+                 ) REFERENCES tests
+                 (
+                     id
+                 ), FOREIGN KEY
+                 (
+                     asset_id
+                 ) REFERENCES assets
+                 (
+                     id
+                 ))''')
+
+    # Seed Default Service Lanes if the board is completely empty
+    c.execute("SELECT COUNT(*) FROM services")
+    if c.fetchone()[0] == 0:
+        c.executemany("INSERT INTO services (id, name, max_concurrent_per_week) VALUES (?, ?, ?)", [
+            (str(uuid.uuid4()), 'Adversary Simulation', 2),
+            (str(uuid.uuid4()), 'White Box', 5),
+            (str(uuid.uuid4()), 'Projects', 10),
+            (str(uuid.uuid4()), 'Black Box', 20)
+        ])
+
     conn.commit()
     conn.close()
 
-init_asset_tables()
-
-def upgrade_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN start_week INTEGER DEFAULT 1")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass # Column already exists!
-    conn.close()
-
-upgrade_db()
+init_db()
 
 app = FastAPI(title="Pentest Planner API - PRO")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"],
