@@ -119,6 +119,26 @@ class UserCreateSecure(BaseModel):
     base_capacity: float = 1.0
     start_week: int = 1
 
+class FirstAdminSetup(BaseModel):
+    username: str
+    password: str
+    name: str
+    location: str
+
+class UserUpdate(BaseModel):
+    name: str
+    role: str
+    location: str
+    base_capacity: float
+    start_week: int
+
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
+class AdminPasswordReset(BaseModel):
+    new_password: str
+
 class EventCreate(BaseModel):
     user_id: Optional[str] = None
     event_type: str
@@ -216,6 +236,37 @@ def calculate_weekly_capacity(user_id, year, week_number):
     return round(capacity, 1)
 
 
+@app.get("/system/status")
+def check_system_status():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return {"is_setup": count > 0}
+
+
+@app.post("/system/setup")
+def setup_first_admin(admin: FirstAdminSetup):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+    if cursor.fetchone()[0] > 0:
+        conn.close()
+        raise HTTPException(status_code=400, detail="System is already setup.")
+
+    salt = bcrypt.gensalt()
+    hashed_pw = bcrypt.hashpw(admin.password.encode('utf-8'), salt).decode('utf-8')
+    new_id = str(uuid.uuid4())
+
+    cursor.execute(
+        'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (new_id, admin.username, hashed_pw, admin.name, 'admin', admin.location, 1.0, 1))
+    conn.commit()
+    conn.close()
+    return {"message": "Admin account created successfully!"}
+
+
 @app.post("/users/")
 def create_user(u: UserCreateSecure, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Only Admins can create new users.")
@@ -248,6 +299,51 @@ def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
     return {"message": "User deleted."}
+
+
+@app.put("/users/{user_id}")
+def update_user(user_id: str, u: UserUpdate, current_user: dict = Depends(get_current_user)):
+    if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Admins only.")
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE users SET name=?, role=?, location=?, base_capacity=?, start_week=? WHERE id=?',
+        (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
+    conn.commit()
+    conn.close()
+    return {"message": "User updated."}
+
+
+@app.put("/users/{user_id}/reset-password")
+def admin_reset_password(user_id: str, p: AdminPasswordReset, current_user: dict = Depends(get_current_user)):
+    if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Admins only.")
+    salt = bcrypt.gensalt()
+    hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE users SET hashed_password=? WHERE id=?', (hashed_pw, user_id))
+    conn.commit()
+    conn.close()
+    return {"message": "User password reset successfully."}
+
+
+@app.put("/users/me/password")
+def change_own_password(p: PasswordChange, current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT hashed_password FROM users WHERE id = ?", (current_user['id'],))
+    db_hash = cursor.fetchone()[0]
+
+    if not verify_password(p.old_password, db_hash):
+        conn.close()
+        raise HTTPException(status_code=400, detail="Incorrect old password.")
+
+    salt = bcrypt.gensalt()
+    new_hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
+    cursor.execute('UPDATE users SET hashed_password=? WHERE id=?', (new_hashed_pw, current_user['id']))
+    conn.commit()
+    conn.close()
+    return {"message": "Password changed successfully."}
 
 
 @app.post("/assets/import")
@@ -595,9 +691,9 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
     services = [{"id": r[0], "name": r[1], "max_per_week": r[2]} for r in cursor.fetchall()]
 
     # Updated to fetch location and base_capacity for the reports!
-    cursor.execute('SELECT id, name, role, location, base_capacity FROM users')
-    pentesters = [{"id": r[0], "name": r[1], "role": r[2], "location": r[3], "capacity": r[4]} for r in
-                  cursor.fetchall()]
+    cursor.execute('SELECT id, name, role, location, base_capacity, username, start_week FROM users')
+    pentesters = [{"id": r[0], "name": r[1], "role": r[2], "location": r[3], "capacity": r[4], "username": r[5],
+                   "start_week": r[6]} for r in cursor.fetchall()]
 
     cursor.execute(
         'SELECT a.test_id, a.user_id, a.week_number, a.allocated_credits, u.name FROM assignments a JOIN users u ON a.user_id = u.id')
