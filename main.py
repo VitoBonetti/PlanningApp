@@ -310,13 +310,33 @@ def get_available_assets(current_user: dict = Depends(get_current_user)):
     cursor.execute("SELECT COUNT(*) FROM assets WHERE is_assigned = 1")
     assigned = cursor.fetchone()[0] or 0
 
-    # Get the available list
-    cursor.execute(
-        "SELECT id, inventory_id, ext_id, number, name, market, gost_service FROM assets WHERE is_assigned = 0")
-    assets = [{"id": r[0], "inventory_id": r[1], "ext_id": r[2], "number": r[3], "name": r[4], "market": r[5],
-               "gost_service": r[6]} for r in cursor.fetchall()]
-    conn.close()
+    # NEW: Get ALL assets and join with tests to see exactly when they are planned!
+    cursor.execute('''
+                   SELECT a.id,
+                          a.inventory_id,
+                          a.ext_id,
+                          a.number,
+                          a.name,
+                          a.market,
+                          a.gost_service,
+                          a.is_assigned,
+                          t.status,
+                          t.start_week,
+                          t.start_year
+                   FROM assets a
+                            LEFT JOIN test_assets ta ON a.id = ta.asset_id
+                            LEFT JOIN tests t ON ta.test_id = t.id
+                   ''')
 
+    assets = []
+    for r in cursor.fetchall():
+        assets.append({
+            "id": r[0], "inventory_id": r[1], "ext_id": r[2], "number": r[3],
+            "name": r[4], "market": r[5], "gost_service": r[6], "is_assigned": bool(r[7]),
+            "test_status": r[8], "start_week": r[9], "start_year": r[10]
+        })
+
+    conn.close()
     return {"assets": assets, "total": total, "assigned": assigned}
 
 @app.post("/events/")
