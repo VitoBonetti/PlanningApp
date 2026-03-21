@@ -2,3 +2,6 @@ fastapi
 uvicorn
 pydantic
 requests
+pandas
+openpyxl
+python-multipart

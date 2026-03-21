@@ -1,8 +1,10 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
+import pandas as pd
+import io
 import sqlite3
 import jwt
 from datetime import datetime, timedelta, timezone
@@ -13,6 +15,33 @@ DB_FILE = 'planner_v2.db'
 SECRET_KEY = "your-super-secret-production-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120
+
+def init_asset_tables():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    # Table for the raw assets imported from Excel
+    c.execute('''CREATE TABLE IF NOT EXISTS assets (
+                    id TEXT PRIMARY KEY, 
+                    inventory_id TEXT, 
+                    ext_id TEXT, 
+                    number TEXT, 
+                    name TEXT, 
+                    market TEXT, 
+                    gost_service TEXT,
+                    is_assigned BOOLEAN DEFAULT 0,
+                    UNIQUE(inventory_id, ext_id, number)
+                )''')
+    # Junction table linking multiple assets to a single test
+    c.execute('''CREATE TABLE IF NOT EXISTS test_assets (
+                    test_id TEXT, 
+                    asset_id TEXT,
+                    FOREIGN KEY(test_id) REFERENCES tests(id),
+                    FOREIGN KEY(asset_id) REFERENCES assets(id)
+                )''')
+    conn.commit()
+    conn.close()
+
+init_asset_tables()
 
 app = FastAPI(title="Pentest Planner API - PRO")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"],
@@ -97,6 +126,7 @@ class TestCreate(BaseModel):
     type: str
     credits_per_week: float
     duration_weeks: int
+    asset_ids: Optional[List[str]] = []
 
 class TestUpdate(BaseModel):
     name: str
@@ -192,6 +222,95 @@ def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
     return {"message": "User deleted."}
 
 
+@app.post("/assets/import")
+async def import_assets(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    if current_user['role'] not in ['admin', 'manager']:
+        raise HTTPException(status_code=403, detail="Only Admins/Managers can import assets.")
+
+    try:
+        # Read the Excel file directly from memory
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+
+        # Strip whitespace from column names just in case
+        df.columns = df.columns.str.strip()
+
+        # Filter ONLY where Pentest Queue is 'YES' (case insensitive)
+        if 'Pentest Queue' in df.columns:
+            df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
+
+        if 'Status_manual_tracking' in df.columns:
+            df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
+
+        # Fill missing values with empty strings to prevent database NULL errors
+        df = df.fillna('')
+
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+
+        added_count = 0
+        updated_count = 0
+
+        for index, row in df.iterrows():
+            # Helper function to safely get column values ignoring case/spaces
+            def get_val(possible_names):
+                for col in df.columns:
+                    if str(col).strip().lower() in [n.lower() for n in possible_names]:
+                        val = str(row[col]).strip()
+                        if val and val.lower() != 'nan':
+                            return val
+                return ''
+
+            inv_id = get_val(['Inventory Id'])
+            ext_id = get_val(['ID'])
+            number = get_val(['Number'])
+
+            if not inv_id and not ext_id and not number:
+                continue
+
+            # Aggressively look for the name
+            name = get_val(['Name']) or 'Unknown Asset'
+            market = get_val(['Market']) or 'Global'
+            gost_service = get_val(['Gost_service']) or 'Unknown'
+
+            # Check if this exact asset request already exists
+            cursor.execute("SELECT id FROM assets WHERE inventory_id=? AND ext_id=? AND number=?",
+                           (inv_id, ext_id, number))
+            existing = cursor.fetchone()
+
+            if existing:
+                cursor.execute(
+                    "UPDATE assets SET name=?, market=?, gost_service=? WHERE inventory_id=? AND ext_id=? AND number=?",
+                    (name, market, gost_service, inv_id, ext_id, number))
+                updated_count += 1
+            else:
+                new_id = str(uuid.uuid4())
+                cursor.execute(
+                    "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                    (new_id, inv_id, ext_id, number, name, market, gost_service))
+                added_count += 1
+
+        conn.commit()
+        conn.close()
+
+        return {"message": f"Import successful! Added {added_count} new assets, updated {updated_count} existing."}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process Excel file: {str(e)}")
+
+
+@app.get("/assets/")
+def get_available_assets(current_user: dict = Depends(get_current_user)):
+    # Returns ONLY assets that have not been assigned to a test yet
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, inventory_id, ext_id, number, name, market, gost_service FROM assets WHERE is_assigned = 0")
+    assets = [{"id": r[0], "inventory_id": r[1], "ext_id": r[2], "number": r[3], "name": r[4], "market": r[5],
+               "gost_service": r[6]} for r in cursor.fetchall()]
+    conn.close()
+    return assets
+
 @app.post("/events/")
 def create_event(e: EventCreate, current_user: dict = Depends(get_current_user)):
     if e.event_type == 'national_holiday': e.user_id = None
@@ -222,16 +341,31 @@ def delete_event(event_id: str, current_user: dict = Depends(get_current_user)):
     conn.commit(); conn.close()
     return {"message": "Holiday deleted"}
 
+
 @app.post("/tests/")
 def create_test(t: TestCreate, current_user: dict = Depends(get_current_user)):
+    if current_user['role'] == 'read_only':
+        raise HTTPException(status_code=403, detail="Read Only")
+
     new_id = str(uuid.uuid4())
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks) VALUES (?, ?, ?, ?, ?, ?)',
-              (new_id, t.name, t.service_id, t.type, t.credits_per_week, t.duration_weeks))
+    c.execute(
+        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (new_id, t.name, t.service_id, t.type, t.credits_per_week, t.duration_weeks, 'Not Planned'))
+
+    # NEW: Link the assets and mark them as assigned!
+    if t.asset_ids:
+        for asset_id in t.asset_ids:
+            # 1. Add to junction table
+            c.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (?, ?)', (new_id, asset_id))
+            # 2. Mark the asset as assigned so it vanishes from the available pool
+            c.execute('UPDATE assets SET is_assigned = 1 WHERE id = ?', (asset_id,))
+
     conn.commit()
     conn.close()
-    return {"status": "ok"}
+    return {"status": "ok", "id": new_id}
 
 
 @app.put("/tests/{test_id}/schedule")
@@ -261,12 +395,27 @@ def unschedule_test(test_id: str, current_user: dict = Depends(get_current_user)
 def delete_test(test_id: str, current_user: dict = Depends(get_current_user)):
     if current_user['role'] not in ['admin', 'manager']:
         raise HTTPException(status_code=403, detail="Only Admins/Managers can delete tests.")
-    conn = sqlite3.connect(DB_FILE); cursor = conn.cursor()
-    # Must delete assignments first due to relational links!
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    # 1. NEW: Find all assets attached to this test and free them!
+    cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = ?', (test_id,))
+    linked_assets = cursor.fetchall()
+
+    for (asset_id,) in linked_assets:
+        cursor.execute('UPDATE assets SET is_assigned = 0 WHERE id = ?', (asset_id,))
+
+    # 2. NEW: Delete the links from the junction table
+    cursor.execute('DELETE FROM test_assets WHERE test_id = ?', (test_id,))
+
+    # 3. ORIGINAL: Delete assignments and the test itself
     cursor.execute('DELETE FROM assignments WHERE test_id = ?', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = ?', (test_id,))
-    conn.commit(); conn.close()
-    return {"message": "Test permanently deleted."}
+
+    conn.commit()
+    conn.close()
+    return {"message": "Test permanently deleted and assets freed."}
 
 
 @app.put("/tests/{test_id}")
@@ -435,9 +584,17 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
 def wipe_system(current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Only Admins can wipe the system.")
-    conn = sqlite3.connect(DB_FILE); cursor = conn.cursor()
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments')
     cursor.execute('DELETE FROM tests')
-    cursor.execute('DELETE FROM events') # Clears all holidays
-    conn.commit(); conn.close()
-    return {"message": "Board wiped clean!"}
+    cursor.execute('DELETE FROM events')  # Clears all holidays
+
+    # NEW: Free up all assets and clear the link table!
+    cursor.execute('DELETE FROM assets')
+    cursor.execute('DELETE FROM test_assets')
+
+    conn.commit()
+    conn.close()
+    return {"message": "Board wiped clean, all assets freed!"}
