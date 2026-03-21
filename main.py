@@ -125,14 +125,14 @@ class TestCreate(BaseModel):
     service_id: str
     type: str
     credits_per_week: float
-    duration_weeks: int
+    duration_weeks: float
     asset_ids: Optional[List[str]] = []
 
 class TestUpdate(BaseModel):
     name: str
     service_id: str
     credits_per_week: float
-    duration_weeks: int
+    duration_weeks: float
     status: Optional[str] = None
 
 class TestSchedule(BaseModel):
@@ -301,15 +301,23 @@ async def import_assets(file: UploadFile = File(...), current_user: dict = Depen
 
 @app.get("/assets/")
 def get_available_assets(current_user: dict = Depends(get_current_user)):
-    # Returns ONLY assets that have not been assigned to a test yet
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+
+    # Get the stats!
+    cursor.execute("SELECT COUNT(*) FROM assets")
+    total = cursor.fetchone()[0] or 0
+    cursor.execute("SELECT COUNT(*) FROM assets WHERE is_assigned = 1")
+    assigned = cursor.fetchone()[0] or 0
+
+    # Get the available list
     cursor.execute(
         "SELECT id, inventory_id, ext_id, number, name, market, gost_service FROM assets WHERE is_assigned = 0")
     assets = [{"id": r[0], "inventory_id": r[1], "ext_id": r[2], "number": r[3], "name": r[4], "market": r[5],
                "gost_service": r[6]} for r in cursor.fetchall()]
     conn.close()
-    return assets
+
+    return {"assets": assets, "total": total, "assigned": assigned}
 
 @app.post("/events/")
 def create_event(e: EventCreate, current_user: dict = Depends(get_current_user)):
