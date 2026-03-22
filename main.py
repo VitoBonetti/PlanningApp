@@ -819,7 +819,7 @@ def duplicate_test(test_id: str, current_user: dict = Depends(get_current_user))
     # 2. Insert the clone into the Backlog (Adding " (Copy)" so you can tell them apart easily)
     cursor.execute(
         'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (new_test_id, f"{name} (Copy)", service_id, t_type, credits, duration, 'Not Planned')
+        (new_test_id, f"{name}", service_id, t_type, credits, duration, 'Not Planned')
     )
 
     # 3. Clone the asset links too!
