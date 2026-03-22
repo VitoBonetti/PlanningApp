@@ -672,7 +672,13 @@ def process_bulk_tests_background(asset_ids: List[str]):
         # Auto-match the service lane
         matched_service_id = fallback_service_id
         for s_id, s_name in services:
-            if ('black' in gost and 'black' in s_name.lower()) or ('white' in gost and 'white' in s_name.lower()):
+            s_name_lower = s_name.lower()
+
+            # Check for our 4 core lane keywords
+            if ('black' in gost and 'black' in s_name_lower) or \
+                    ('white' in gost and 'white' in s_name_lower) or \
+                    ('adversary' in gost and 'adversary' in s_name_lower) or \
+                    ('project' in gost and 'project' in s_name_lower):
                 matched_service_id = s_id
                 break
 
