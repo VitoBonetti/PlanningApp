@@ -6,7 +6,8 @@ services:
     container_name: erp-backend
     restart: always
     volumes:
-      - ./db_data:/app/data
+      # CHANGED: Now using a Named Volume instead of a local host folder
+      - planner_db_data:/app/data
 
   frontend:
     build:
@@ -15,7 +16,10 @@ services:
     container_name: erp-frontend
     restart: always
     ports:
-      # Map the VM's standard HTTP port to the container's unprivileged port
       - "80:8080"
     depends_on:
       - backend
+
+# NEW: Declare the Named Volume so Docker knows to create it with the right permissions
+volumes:
+  planner_db_data:
