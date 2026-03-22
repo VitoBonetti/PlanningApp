@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import uuid
 
-DB_FILE = 'planner_v2.db'
+DB_FILE = 'data/planner_v2.db'
 SECRET_KEY = "your-super-secret-production-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120

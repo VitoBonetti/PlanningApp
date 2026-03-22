@@ -1,0 +1,9 @@
+.git/
+.gitignore
+node_modules/
+__pycache__/
+*.db
+*.sqlite3
+.env
+dist/
+build/
