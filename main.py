@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, BackgroundTasks
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -246,11 +246,13 @@ class UserCreateSecure(BaseModel):
     base_capacity: float = 1.0
     start_week: int = 1
 
+
 class FirstAdminSetup(BaseModel):
     username: str
     password: str
     name: str
     location: str
+
 
 class UserUpdate(BaseModel):
     name: str
@@ -259,12 +261,15 @@ class UserUpdate(BaseModel):
     base_capacity: float
     start_week: int
 
+
 class PasswordChange(BaseModel):
     old_password: str
     new_password: str
 
+
 class AdminPasswordReset(BaseModel):
     new_password: str
+
 
 class EventCreate(BaseModel):
     user_id: Optional[str] = None
@@ -273,12 +278,14 @@ class EventCreate(BaseModel):
     start_date: str
     end_date: str
 
+
 class EventUpdate(BaseModel):
     user_id: Optional[str] = None
     event_type: str
     location: Optional[str] = None
     start_date: str
     end_date: str
+
 
 class TestCreate(BaseModel):
     name: str
@@ -288,6 +295,7 @@ class TestCreate(BaseModel):
     duration_weeks: float
     asset_ids: Optional[List[str]] = []
 
+
 class TestUpdate(BaseModel):
     name: str
     service_id: str
@@ -295,9 +303,11 @@ class TestUpdate(BaseModel):
     duration_weeks: float
     status: Optional[str] = None
 
+
 class TestSchedule(BaseModel):
     start_week: Optional[int]
     start_year: Optional[int]
+
 
 class AssignmentCreate(BaseModel):
     test_id: str
@@ -305,6 +315,10 @@ class AssignmentCreate(BaseModel):
     week_number: int
     year: int
     allocated_credits: float
+
+
+class BulkTestCreate(BaseModel):
+    asset_ids: List[str]
 
 
 def get_quarter_weeks(q: int):
@@ -414,7 +428,7 @@ def create_user(u: UserCreateSecure, current_user: dict = Depends(get_current_us
         raise HTTPException(status_code=400, detail="Username already exists.")
 
 
-# NEW: Delete User Endpoint
+# Delete User Endpoint
 @app.delete("/users/{user_id}")
 def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Admins only.")
@@ -473,81 +487,64 @@ def change_own_password(p: PasswordChange, current_user: dict = Depends(get_curr
     return {"message": "Password changed successfully."}
 
 
-@app.post("/assets/import")
-async def import_assets(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
-        raise HTTPException(status_code=403, detail="Only Admins/Managers can import assets.")
-
+# Excel Parser
+def process_excel_background(contents: bytes):
     try:
-        # Read the Excel file directly from memory
-        contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
-
-        # Strip whitespace from column names just in case
         df.columns = df.columns.str.strip()
-
-        # Filter ONLY where Pentest Queue is 'YES' (case insensitive)
         if 'Pentest Queue' in df.columns:
             df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
-
         if 'Status_manual_tracking' in df.columns:
             df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
-
-        # Fill missing values with empty strings to prevent database NULL errors
         df = df.fillna('')
 
-        conn = sqlite3.connect(DB_FILE)
+        conn = sqlite3.connect(DB_FILE, timeout=10)  # Added timeout for safety
         cursor = conn.cursor()
 
-        added_count = 0
-        updated_count = 0
-
         for index, row in df.iterrows():
-            # Helper function to safely get column values ignoring case/spaces
             def get_val(possible_names):
                 for col in df.columns:
                     if str(col).strip().lower() in [n.lower() for n in possible_names]:
                         val = str(row[col]).strip()
-                        if val and val.lower() != 'nan':
-                            return val
+                        if val and val.lower() != 'nan': return val
                 return ''
 
             inv_id = get_val(['Inventory Id'])
             ext_id = get_val(['ID'])
             number = get_val(['Number'])
+            if not inv_id and not ext_id and not number: continue
 
-            if not inv_id and not ext_id and not number:
-                continue
-
-            # Aggressively look for the name
             name = get_val(['Name']) or 'Unknown Asset'
             market = get_val(['Market']) or 'Global'
             gost_service = get_val(['Gost_service']) or 'Unknown'
 
-            # Check if this exact asset request already exists
             cursor.execute("SELECT id FROM assets WHERE inventory_id=? AND ext_id=? AND number=?",
                            (inv_id, ext_id, number))
-            existing = cursor.fetchone()
-
-            if existing:
+            if cursor.fetchone():
                 cursor.execute(
                     "UPDATE assets SET name=?, market=?, gost_service=? WHERE inventory_id=? AND ext_id=? AND number=?",
                     (name, market, gost_service, inv_id, ext_id, number))
-                updated_count += 1
             else:
-                new_id = str(uuid.uuid4())
                 cursor.execute(
                     "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-                    (new_id, inv_id, ext_id, number, name, market, gost_service))
-                added_count += 1
+                    (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service))
 
         conn.commit()
         conn.close()
-
-        return {"message": f"Import successful! Added {added_count} new assets, updated {updated_count} existing."}
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process Excel file: {str(e)}")
+        print(f"Background Import Failed: {e}")
+
+
+#  Receives file and triggers worker
+@app.post("/assets/import")
+async def import_assets(background_tasks: BackgroundTasks, file: UploadFile = File(...),
+                        current_user: dict = Depends(get_current_user)):
+    if current_user['role'] not in ['admin', 'manager']:
+        raise HTTPException(status_code=403, detail="Only Admins/Managers can import assets.")
+
+    contents = await file.read()  # Read file into memory NOW before the connection closes
+    background_tasks.add_task(process_excel_background, contents)  # Hand bytes to worker
+    return {"message": "Excel file received! Importing in the background."}
 
 
 @app.get("/assets/")
@@ -618,7 +615,7 @@ def update_event(event_id: str, e: EventUpdate, current_user: dict = Depends(get
     return {"message": "Holiday updated"}
 
 
-# NEW: Delete a holiday
+# Delete a holiday
 @app.delete("/events/{event_id}")
 def delete_event(event_id: str, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE); c = conn.cursor()
@@ -652,6 +649,56 @@ def create_test(t: TestCreate, current_user: dict = Depends(get_current_user)):
     conn.close()
     return {"status": "ok", "id": new_id}
 
+
+# --- BACKGROUND WORKER: Bulk Test Generator ---
+def process_bulk_tests_background(asset_ids: List[str]):
+    conn = sqlite3.connect(DB_FILE, timeout=10)
+    cursor = conn.cursor()
+
+    # 1. Get all services so we can auto-match White/Black box
+    cursor.execute('SELECT id, name FROM services')
+    services = cursor.fetchall()
+    fallback_service_id = services[0][0] if services else ""
+
+    for asset_id in asset_ids:
+        # Get the asset details
+        cursor.execute('SELECT name, gost_service FROM assets WHERE id = ?', (asset_id,))
+        asset = cursor.fetchone()
+        if not asset: continue
+
+        asset_name, gost = asset
+        gost = str(gost).lower()
+
+        # Auto-match the service lane
+        matched_service_id = fallback_service_id
+        for s_id, s_name in services:
+            if ('black' in gost and 'black' in s_name.lower()) or ('white' in gost and 'white' in s_name.lower()):
+                matched_service_id = s_id
+                break
+
+        new_test_id = str(uuid.uuid4())
+
+        # Create Test (Defaults: 2.0 credits, 1.0 weeks)
+        cursor.execute(
+            'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (new_test_id, asset_name, matched_service_id, 'test', 2.0, 1.0, 'Not Planned'))
+
+        # Link Asset and mark assigned
+        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (?, ?)', (new_test_id, asset_id))
+        cursor.execute('UPDATE assets SET is_assigned = 1 WHERE id = ?', (asset_id,))
+
+    conn.commit()
+    conn.close()
+
+
+# Triggers Bulk Generation ---
+@app.post("/tests/bulk")
+def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
+                      current_user: dict = Depends(get_current_user)):
+    if current_user['role'] == 'read_only': raise HTTPException(status_code=403, detail="Read Only")
+
+    background_tasks.add_task(process_bulk_tests_background, req.asset_ids)
+    return {"message": f"Generating {len(req.asset_ids)} tests in the background!"}
 
 @app.put("/tests/{test_id}/schedule")
 def schedule_test(test_id: str, schedule: TestSchedule, current_user: dict = Depends(get_current_user)):
