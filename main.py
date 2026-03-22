@@ -796,6 +796,43 @@ def complete_test(test_id: str, current_user: dict = Depends(get_current_user)):
     conn.close()
     return {"message": "Test marked as Completed."}
 
+
+@app.post("/tests/{test_id}/duplicate")
+def duplicate_test(test_id: str, current_user: dict = Depends(get_current_user)):
+    if current_user['role'] not in ['admin', 'manager']:
+        raise HTTPException(status_code=403, detail="Not authorized.")
+
+    conn = sqlite3.connect(DB_FILE, timeout=10)
+    cursor = conn.cursor()
+
+    # 1. Fetch the original test
+    cursor.execute('SELECT name, service_id, type, credits_per_week, duration_weeks FROM tests WHERE id = ?',
+                   (test_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    name, service_id, t_type, credits, duration = row
+    new_test_id = str(uuid.uuid4())
+
+    # 2. Insert the clone into the Backlog (Adding " (Copy)" so you can tell them apart easily)
+    cursor.execute(
+        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (new_test_id, f"{name} (Copy)", service_id, t_type, credits, duration, 'Not Planned')
+    )
+
+    # 3. Clone the asset links too!
+    cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = ?', (test_id,))
+    assets = cursor.fetchall()
+    for (asset_id,) in assets:
+        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (?, ?)', (new_test_id, asset_id))
+
+    conn.commit()
+    conn.close()
+    return {"message": "Project duplicated to the Backlog!"}
+
+
 @app.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE)
