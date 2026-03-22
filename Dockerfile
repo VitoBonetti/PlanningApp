@@ -10,7 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
-COPY main.py .
+COPY . /app/
 
 # Create the data directory and give ownership ONLY to the non-root user
 RUN mkdir -p /app/data && chown -R appuser:appgroup /app
