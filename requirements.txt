@@ -7,3 +7,4 @@ openpyxl
 python-multipart
 bcrypt
 PyJWT
+google-cloud-secret-manager

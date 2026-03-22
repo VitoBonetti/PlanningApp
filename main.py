@@ -10,12 +10,33 @@ import jwt
 from datetime import datetime, timedelta, timezone
 import bcrypt
 import uuid
+import os
+from google.cloud import secretmanager
 
 DB_FILE = '/app/data/planner_v2.db'
-SECRET_KEY = "your-super-secret-production-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120
+PROJECT_ID = "planningapp-491007"
 
+
+def get_secret(secret_id, project_id="your-gcp-project-id"):
+    # Fallback for local development so your app doesn't crash on your laptop
+    if os.environ.get("ENV") == "local":
+        return "local-dev-secret-key"
+
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        print(f"Failed to fetch secret: {e}")
+        # Failsafe so the app still boots if GCP acts up, but warns you
+        return "fallback-insecure-key"
+
+
+# IMPORTANT: Replace "your-gcp-project-id" below with your actual Google Cloud Project ID!
+SECRET_KEY = get_secret("JWT_SECRET_KEY", PROJECT_ID)
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
