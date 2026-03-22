@@ -5,3 +5,5 @@ requests
 pandas
 openpyxl
 python-multipart
+bcrypt
+PyJWT
