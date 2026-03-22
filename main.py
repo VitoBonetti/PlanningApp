@@ -19,7 +19,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 120
 PROJECT_ID = "planningapp-491007"
 
 
-def get_secret(secret_id, project_id="your-gcp-project-id"):
+def get_secret(secret_id, project_id):
     # Fallback for local development so your app doesn't crash on your laptop
     if os.environ.get("ENV") == "local":
         return "local-dev-secret-key"
