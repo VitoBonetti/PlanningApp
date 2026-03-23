@@ -40,6 +40,11 @@ def init_db():
                      status TEXT DEFAULT 'Not Planned'
                  )''')
 
+    try:
+        c.execute("ALTER TABLE tests ADD COLUMN whitebox_category TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+
     c.execute('''CREATE TABLE IF NOT EXISTS events
                  (
                      id TEXT PRIMARY KEY,

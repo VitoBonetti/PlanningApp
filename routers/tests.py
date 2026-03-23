@@ -21,8 +21,9 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute(
-        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (new_id, t.name, t.service_id, t.type, t.credits_per_week, t.duration_weeks, 'Not Planned'))
+        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (new_id, t.name, t.service_id, t.type, t.credits_per_week, t.duration_weeks, 'Not Planned',
+         t.whitebox_category))
 
     # Link the assets and mark them as assigned!
     if t.asset_ids:
@@ -42,42 +43,35 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: 
 def process_bulk_tests_background(asset_ids: List[str]):
     conn = sqlite3.connect(DB_FILE, timeout=10)
     cursor = conn.cursor()
-
-    # 1. Get all services so we can auto-match White/Black box
     cursor.execute('SELECT id, name FROM services')
     services = cursor.fetchall()
     fallback_service_id = services[0][0] if services else ""
 
     for asset_id in asset_ids:
-        # Get the asset details
-        cursor.execute('SELECT name, gost_service FROM assets WHERE id = ?', (asset_id,))
+        # 1. NEW: Fetch whitebox_category from the asset!
+        cursor.execute('SELECT name, gost_service, whitebox_category FROM assets WHERE id = ?', (asset_id,))
         asset = cursor.fetchone()
         if not asset: continue
 
-        asset_name, gost = asset
+        asset_name, gost, whitebox_cat = asset
         gost = str(gost).lower()
-
-        # Auto-match the service lane
         matched_service_id = fallback_service_id
+
         for s_id, s_name in services:
             s_name_lower = s_name.lower()
-
-            # Check for our 4 core lane keywords
-            if ('black' in gost and 'black' in s_name_lower) or \
-                    ('white' in gost and 'white' in s_name_lower) or \
-                    ('adversary' in gost and 'adversary' in s_name_lower) or \
-                    ('project' in gost and 'project' in s_name_lower):
+            if ('black' in gost and 'black' in s_name_lower) or ('white' in gost and 'white' in s_name_lower) or (
+                    'adversary' in gost and 'adversary' in s_name_lower) or (
+                    'project' in gost and 'project' in s_name_lower):
                 matched_service_id = s_id
                 break
 
         new_test_id = str(uuid.uuid4())
 
-        # Create Test (Defaults: 2.0 credits, 1.0 weeks)
+        # 2. NEW: Insert the whitebox_cat into the tests table!
         cursor.execute(
-            'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (new_test_id, asset_name, matched_service_id, 'test', 2.0, 1.0, 'Not Planned'))
-
-        # Link Asset and mark assigned
+            'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (new_test_id, asset_name, matched_service_id, 'test', 2.0, 1.0, 'Not Planned', whitebox_cat)
+        )
         cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (?, ?)', (new_test_id, asset_id))
         cursor.execute('UPDATE assets SET is_assigned = 1 WHERE id = ?', (asset_id,))
 
@@ -163,15 +157,9 @@ def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, 
         cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = ?', (test_id,))
 
     # Update everything else, safely saving the new Status!
-    cursor.execute('''
-                   UPDATE tests
-                   SET name             = ?,
-                       service_id       = ?,
-                       credits_per_week = ?,
-                       duration_weeks   = ?,
-                       status           = COALESCE(?, status)
-                   WHERE id = ?
-                   ''', (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, test_id))
+    cursor.execute(
+        'UPDATE tests SET name=?, service_id=?, credits_per_week=?, duration_weeks=?, status=COALESCE(?, status), whitebox_category=? WHERE id=?',
+        (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
     conn.commit()
     conn.close()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')

@@ -60,6 +60,7 @@ class TestCreate(BaseModel):
     credits_per_week: float
     duration_weeks: float
     asset_ids: Optional[List[str]] = []
+    whitebox_category: Optional[str] = ""
 
 
 class TestUpdate(BaseModel):
@@ -68,6 +69,7 @@ class TestUpdate(BaseModel):
     credits_per_week: float
     duration_weeks: float
     status: Optional[str] = None
+    whitebox_category: Optional[str] = ""
 
 
 class TestSchedule(BaseModel):
