@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from database import DB_FILE
 from routers.auth import get_current_user
 from models import EventCreate, EventUpdate
+from websockets_manager import manager
 
 router = APIRouter(tags=["Board & Events"])
 
@@ -65,7 +66,7 @@ def calculate_weekly_capacity(user_id, year, week_number):
     return round(capacity, 1)
 
 @router.post("/events/")
-def create_event(e: EventCreate, current_user: dict = Depends(get_current_user)):
+def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if e.event_type in ['national_holiday', 'team_day']:
         e.user_id = None
     if e.event_type == 'team_day':
@@ -77,11 +78,12 @@ def create_event(e: EventCreate, current_user: dict = Depends(get_current_user))
               (new_id, e.user_id, e.event_type, e.location, e.start_date, e.end_date))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
 
 
 @router.put("/events/{event_id}")
-def update_event(event_id: str, e: EventUpdate, current_user: dict = Depends(get_current_user)):
+def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if e.event_type in ['national_holiday', 'team_day']:
         e.user_id = None
     if e.event_type == 'team_day':
@@ -89,15 +91,17 @@ def update_event(event_id: str, e: EventUpdate, current_user: dict = Depends(get
     conn = sqlite3.connect(DB_FILE); c = conn.cursor()
     c.execute('UPDATE events SET user_id=?, event_type=?, location=?, start_date=?, end_date=? WHERE id=?', (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
     conn.commit(); conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday updated"}
 
 
 # Delete a holiday
 @router.delete("/events/{event_id}")
-def delete_event(event_id: str, current_user: dict = Depends(get_current_user)):
+def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE); c = conn.cursor()
     c.execute('DELETE FROM events WHERE id=?', (event_id,))
     conn.commit(); conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday deleted"}
 
 
@@ -159,7 +163,7 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
 
 
 @router.delete("/system/wipe")
-def wipe_system(current_user: dict = Depends(get_current_user)):
+def wipe_system(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Only Admins can wipe the system.")
 
@@ -175,6 +179,7 @@ def wipe_system(current_user: dict = Depends(get_current_user)):
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Board wiped clean, all assets freed!"}
 
 

@@ -12,7 +12,7 @@ router = APIRouter(tags=["Tests & Assignments"])
 
 
 @router.post("/tests/")
-def create_test(t: TestCreate, current_user: dict = Depends(get_current_user)):
+def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] == 'read_only':
         raise HTTPException(status_code=403, detail="Read Only")
 
@@ -24,16 +24,17 @@ def create_test(t: TestCreate, current_user: dict = Depends(get_current_user)):
         'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
         (new_id, t.name, t.service_id, t.type, t.credits_per_week, t.duration_weeks, 'Not Planned'))
 
-    # NEW: Link the assets and mark them as assigned!
+    # Link the assets and mark them as assigned!
     if t.asset_ids:
         for asset_id in t.asset_ids:
-            # 1. Add to junction table
+            # Add to junction table
             c.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (?, ?)', (new_id, asset_id))
-            # 2. Mark the asset as assigned so it vanishes from the available pool
+            # Mark the asset as assigned so it vanishes from the available pool
             c.execute('UPDATE assets SET is_assigned = 1 WHERE id = ?', (asset_id,))
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok", "id": new_id}
 
 
@@ -108,7 +109,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 
 
 @router.put("/tests/{test_id}/unschedule")
-def unschedule_test(test_id: str, current_user: dict = Depends(get_current_user)):
+def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE test_id = ?', (test_id,))
@@ -116,11 +117,12 @@ def unschedule_test(test_id: str, current_user: dict = Depends(get_current_user)
                    (test_id,))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unscheduled"}
 
 
 @router.delete("/tests/{test_id}")
-def delete_test(test_id: str, current_user: dict = Depends(get_current_user)):
+def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] not in ['admin', 'manager']:
         raise HTTPException(status_code=403, detail="Only Admins/Managers can delete tests.")
 
@@ -143,11 +145,12 @@ def delete_test(test_id: str, current_user: dict = Depends(get_current_user)):
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test permanently deleted and assets freed."}
 
 
 @router.put("/tests/{test_id}")
-def update_test(test_id: str, t: TestUpdate, current_user: dict = Depends(get_current_user)):
+def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(get_current_user)):
     if current_user['role'] not in ['admin', 'manager']:
         raise HTTPException(status_code=403, detail="Only Admins/Managers can edit tests.")
 
@@ -171,11 +174,12 @@ def update_test(test_id: str, t: TestUpdate, current_user: dict = Depends(get_cu
                    ''', (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, test_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test updated successfully."}
 
 
 @router.put("/tests/{test_id}/complete")
-def complete_test(test_id: str, current_user: dict = Depends(get_current_user)):
+def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] not in ['admin', 'manager']:
         raise HTTPException(status_code=403, detail="Only Admins/Managers can complete tests.")
 
@@ -184,11 +188,12 @@ def complete_test(test_id: str, current_user: dict = Depends(get_current_user)):
     cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = ?", (test_id,))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test marked as Completed."}
 
 
 @router.post("/tests/{test_id}/duplicate")
-def duplicate_test(test_id: str, current_user: dict = Depends(get_current_user)):
+def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] not in ['admin', 'manager']:
         raise HTTPException(status_code=403, detail="Not authorized.")
 
@@ -220,11 +225,12 @@ def duplicate_test(test_id: str, current_user: dict = Depends(get_current_user))
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Project duplicated to the Backlog!"}
 
 
 @router.post("/assignments/")
-def create_assignment(assign: AssignmentCreate, current_user: dict = Depends(get_current_user)):
+def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
@@ -275,14 +281,16 @@ def create_assignment(assign: AssignmentCreate, current_user: dict = Depends(get
         (new_id, assign.test_id, assign.user_id, assign.week_number, assign.year, actual_provided))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Assigned"}
 
 
 @router.delete("/assignments/{test_id}/{user_id}")
-def remove_assignment(test_id: str, user_id: str, current_user: dict = Depends(get_current_user)):
+def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE test_id = ? AND user_id = ?', (test_id, user_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unassigned"}

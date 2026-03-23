@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import sqlite3
 import uuid
 import bcrypt
 from database import DB_FILE
 from routers.auth import get_current_user, verify_password
 from models import UserCreateSecure, UserUpdate, PasswordChange, AdminPasswordReset, FirstAdminSetup
+from websockets_manager import manager
 
 router = APIRouter(tags=["Users"])
 
@@ -41,7 +42,7 @@ def setup_first_admin(admin: FirstAdminSetup):
 
 
 @router.post("/users/")
-def create_user(u: UserCreateSecure, current_user: dict = Depends(get_current_user)):
+def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Only Admins can create new users.")
     salt = bcrypt.gensalt()
     hashed_pw = bcrypt.hashpw(u.password.encode('utf-8'), salt).decode('utf-8')
@@ -55,6 +56,7 @@ def create_user(u: UserCreateSecure, current_user: dict = Depends(get_current_us
             (new_id, u.username, hashed_pw, u.name, u.role, u.location, u.base_capacity, u.start_week))
         conn.commit()
         conn.close()
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
         return {"message": f"User {u.name} created."}
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Username already exists.")
@@ -62,7 +64,7 @@ def create_user(u: UserCreateSecure, current_user: dict = Depends(get_current_us
 
 # Delete User Endpoint
 @router.delete("/users/{user_id}")
-def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
+def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Admins only.")
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -71,11 +73,12 @@ def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
     cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "User deleted."}
 
 
 @router.put("/users/{user_id}")
-def update_user(user_id: str, u: UserUpdate, current_user: dict = Depends(get_current_user)):
+def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Admins only.")
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -84,6 +87,7 @@ def update_user(user_id: str, u: UserUpdate, current_user: dict = Depends(get_cu
         (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "User updated."}
 
 
