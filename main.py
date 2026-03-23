@@ -22,6 +22,7 @@ app.include_router(board.router)
 
 # Websocket route
 @app.websocket("/ws/board")
+@app.websocket("/api/ws/board")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
