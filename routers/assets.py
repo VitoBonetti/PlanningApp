@@ -9,6 +9,7 @@ from routers.auth import get_current_user
 
 router = APIRouter(tags=["Assets"])
 
+
 # Excel Parser
 def process_excel_background(contents: bytes):
     try:
@@ -20,7 +21,7 @@ def process_excel_background(contents: bytes):
             df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
         df = df.fillna('')
 
-        conn = sqlite3.connect(DB_FILE, timeout=10)  # Added timeout for safety
+        conn = sqlite3.connect(DB_FILE, timeout=10)
         cursor = conn.cursor()
 
         for index, row in df.iterrows():
@@ -40,16 +41,24 @@ def process_excel_background(contents: bytes):
             market = get_val(['Market']) or 'Global'
             gost_service = get_val(['Gost_service']) or 'Unknown'
 
+            # --- NEW DATA COLUMNS ---
+            business_critical = get_val(['Business Critical']) or ''
+            kpi = get_val(['KPI']) or ''
+            whitebox_category = get_val(['WhiteBox Category']) or ''
+
             cursor.execute("SELECT id FROM assets WHERE inventory_id=? AND ext_id=? AND number=?",
                            (inv_id, ext_id, number))
             if cursor.fetchone():
+                # UPDATE existing record with fresh Excel data
                 cursor.execute(
-                    "UPDATE assets SET name=?, market=?, gost_service=? WHERE inventory_id=? AND ext_id=? AND number=?",
-                    (name, market, gost_service, inv_id, ext_id, number))
+                    "UPDATE assets SET name=?, market=?, gost_service=?, business_critical=?, kpi=?, whitebox_category=? WHERE inventory_id=? AND ext_id=? AND number=?",
+                    (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
             else:
+                # INSERT new record
                 cursor.execute(
-                    "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-                    (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service))
+                    "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                    (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi,
+                     whitebox_category))
 
         conn.commit()
         conn.close()
@@ -57,15 +66,13 @@ def process_excel_background(contents: bytes):
         print(f"Background Import Failed: {e}")
 
 
-#  Receives file and triggers worker
 @router.post("/assets/import")
 async def import_assets(background_tasks: BackgroundTasks, file: UploadFile = File(...),
                         current_user: dict = Depends(get_current_user)):
     if current_user['role'] not in ['admin', 'manager']:
         raise HTTPException(status_code=403, detail="Only Admins/Managers can import assets.")
-
-    contents = await file.read()  # Read file into memory NOW before the connection closes
-    background_tasks.add_task(process_excel_background, contents)  # Hand bytes to worker
+    contents = await file.read()
+    background_tasks.add_task(process_excel_background, contents)
     return {"message": "Excel file received! Importing in the background."}
 
 
@@ -74,13 +81,12 @@ def get_available_assets(current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # Get the stats!
     cursor.execute("SELECT COUNT(*) FROM assets")
     total = cursor.fetchone()[0] or 0
     cursor.execute("SELECT COUNT(*) FROM assets WHERE is_assigned = 1")
     assigned = cursor.fetchone()[0] or 0
 
-    # NEW: Get ALL assets and join with tests to see exactly when they are planned!
+    # Fetch the new columns from the DB
     cursor.execute('''
                    SELECT a.id,
                           a.inventory_id,
@@ -92,7 +98,10 @@ def get_available_assets(current_user: dict = Depends(get_current_user)):
                           a.is_assigned,
                           t.status,
                           t.start_week,
-                          t.start_year
+                          t.start_year,
+                          a.business_critical,
+                          a.kpi,
+                          a.whitebox_category
                    FROM assets a
                             LEFT JOIN test_assets ta ON a.id = ta.asset_id
                             LEFT JOIN tests t ON ta.test_id = t.id
@@ -103,7 +112,10 @@ def get_available_assets(current_user: dict = Depends(get_current_user)):
         assets.append({
             "id": r[0], "inventory_id": r[1], "ext_id": r[2], "number": r[3],
             "name": r[4], "market": r[5], "gost_service": r[6], "is_assigned": bool(r[7]),
-            "test_status": r[8], "start_week": r[9], "start_year": r[10]
+            "test_status": r[8], "start_week": r[9], "start_year": r[10],
+            "business_critical": r[11] or '',
+            "kpi": r[12] or '',
+            "whitebox_category": r[13] or ''
         })
 
     conn.close()
