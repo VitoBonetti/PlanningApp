@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from database import DB_FILE
 from routers.auth import get_current_user
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
+from websockets_manager import manager
 
 router = APIRouter(tags=["Tests & Assignments"])
 
@@ -93,13 +94,16 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     return {"message": f"Generating {len(req.asset_ids)} tests in the background!"}
 
 @router.put("/tests/{test_id}/schedule")
-def schedule_test(test_id: str, schedule: TestSchedule, current_user: dict = Depends(get_current_user)):
+def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute('UPDATE tests SET start_week = ?, start_year = ?, status = "Planned" WHERE id = ?',
-                   (schedule.start_week, schedule.start_year, test_id))
+    cursor.execute('UPDATE tests SET start_week = ?, start_year = ?, status = "Planned" WHERE id = ?', (schedule.start_week, schedule.start_year, test_id))
     conn.commit()
     conn.close()
+
+    # THE MAGIC: Tell everyone else to refresh their screen!
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     return {"message": "Scheduled"}
 
 
