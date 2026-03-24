@@ -10,30 +10,18 @@ from websockets_manager import manager
 router = APIRouter(tags=["Board & Events"])
 
 
-def get_quarter_weeks(q: int):
-    if q == 1: return range(1, 14)
-    if q == 2: return range(14, 27)
-    if q == 3: return range(27, 40)
-    if q == 4: return range(40, 53)
-    return []
-
-
-def calculate_weekly_capacity(user_id, year, week_number):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+def get_user_provision_internal(cursor, user_id, year, week_number):
+    """Calculates exactly how much capacity a user provides in a specific week,
+    accounting for holidays and their start date."""
     cursor.execute('SELECT base_capacity, location, start_week FROM users WHERE id = ?', (user_id,))
     user_data = cursor.fetchone()
     if not user_data: return 0.0
     base_cap, user_location, start_week = user_data
 
-    # Safe fallback just in case old users have NULL
     if start_week is None: start_week = 1
+    if week_number < start_week: return 0.0
 
-    # THE MAGIC LOCK: If the week we are checking is before they joined, their capacity is 0!
-    if week_number < start_week:
-        return 0.0
-
-    # NEW: Added 'team_day' to the SQL query so it affects everyone!
+    # Fetch all relevant events (holidays, team days)
     cursor.execute("""
                    SELECT start_date, end_date
                    FROM events
@@ -47,8 +35,7 @@ def calculate_weekly_capacity(user_id, year, week_number):
     for day in range(1, 6):
         try:
             week_dates.append(datetime.strptime(f"{year}-W{week_number}-{day}", "%G-W%V-%u").strftime('%Y-%m-%d'))
-        except ValueError:
-            continue
+        except ValueError: continue
 
     days_off = 0
     for start_str, end_str in events:
@@ -57,13 +44,34 @@ def calculate_weekly_capacity(user_id, year, week_number):
         event_dates = [(s + timedelta(days=i)).strftime('%Y-%m-%d') for i in range((e - s).days + 1)]
         days_off += sum(1 for w in week_dates if w in event_dates)
 
-    cursor.execute('SELECT SUM(allocated_credits) FROM assignments WHERE user_id = ? AND year = ? AND week_number = ?',
+    return max(0.0, base_cap - (days_off * 0.2))
+
+
+def get_quarter_weeks(q: int):
+    if q == 1: return range(1, 14)
+    if q == 2: return range(14, 27)
+    if q == 3: return range(27, 40)
+    if q == 4: return range(40, 53)
+    return []
+
+
+def calculate_weekly_capacity(user_id, year, week_number):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    # Calculate what the user COULD provide
+    provision = get_user_provision_internal(cursor, user_id, year, week_number)
+
+    # Check if they are already assigned to a test this week
+    cursor.execute('SELECT 1 FROM assignments WHERE user_id = ? AND year = ? AND week_number = ?',
                    (user_id, year, week_number))
-    assigned_credits = cursor.fetchone()[0] or 0.0
+    is_assigned = cursor.fetchone() is not None
     conn.close()
 
-    capacity = max(0.0, base_cap - (days_off * 0.2) - assigned_credits)
-    return round(capacity, 1)
+    # If assigned, their remaining capacity for the board is 0
+    if is_assigned:
+        return 0.0
+    return round(provision, 1)
 
 @router.post("/events/")
 def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
@@ -114,15 +122,27 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
     cursor.execute('SELECT id, name, max_concurrent_per_week FROM services')
     services = [{"id": r[0], "name": r[1], "max_per_week": r[2]} for r in cursor.fetchall()]
 
-    # Updated to fetch location and base_capacity for the reports!
     cursor.execute('SELECT id, name, role, location, base_capacity, username, start_week FROM users')
     pentesters = [{"id": r[0], "name": r[1], "role": r[2], "location": r[3], "capacity": r[4], "username": r[5],
                    "start_week": r[6]} for r in cursor.fetchall()]
 
+    # FIX: We fetch the assignments but ignore the static 'allocated_credits' column,
+    # recalculating it on-the-fly based on current holidays.
     cursor.execute(
-        'SELECT a.test_id, a.user_id, a.week_number, a.allocated_credits, u.name FROM assignments a JOIN users u ON a.user_id = u.id')
-    assignments = [{"test_id": r[0], "user_id": r[1], "week_number": r[2], "allocated_credits": r[3], "user_name": r[4]}
-                   for r in cursor.fetchall()]
+        'SELECT a.test_id, a.user_id, a.week_number, u.name FROM assignments a JOIN users u ON a.user_id = u.id')
+    raw_assignments = cursor.fetchall()
+
+    assignments = []
+    for r in raw_assignments:
+        test_id, user_id, week_number, user_name = r
+        dynamic_credits = get_user_provision_internal(cursor, user_id, year, week_number)
+        assignments.append({
+            "test_id": test_id,
+            "user_id": user_id,
+            "week_number": week_number,
+            "allocated_credits": dynamic_credits,
+            "user_name": user_name
+        })
 
     cursor.execute('''
                    SELECT id,
@@ -150,7 +170,6 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
         else:
             scheduled.append(test_obj)
 
-    # NEW: Fetch all Events/Holidays for the reports
     cursor.execute('''
                    SELECT e.id, e.user_id, e.event_type, e.location, e.start_date, e.end_date, u.name
                    FROM events e
@@ -160,16 +179,17 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
         {"id": r[0], "user_id": r[1], "type": r[2], "location": r[3], "start": r[4], "end": r[5], "user_name": r[6]} for
         r in cursor.fetchall()]
 
-    conn.close()
-
+    # Matrix for column availability indicators
     cap_matrix = {p["id"]: {w: calculate_weekly_capacity(p["id"], year, w) for w in weeks} for p in pentesters}
+
+    conn.close()
 
     return {
         "year": year, "quarter": quarter, "weeks": weeks, "services": services,
         "pentesters": pentesters, "capacities": cap_matrix,
         "backlog": backlog, "scheduled": scheduled,
         "assignments": assignments,
-        "events": events  # <-- Added to the payload!
+        "events": events
     }
 
 
