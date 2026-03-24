@@ -124,16 +124,27 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
     assignments = [{"test_id": r[0], "user_id": r[1], "week_number": r[2], "allocated_credits": r[3], "user_name": r[4]}
                    for r in cursor.fetchall()]
 
-    # NEW: Added 'status' to the SELECT query
-    cursor.execute(
-        'SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category FROM tests')
+    cursor.execute('''
+                   SELECT id,
+                          name,
+                          service_id,
+                          credits_per_week,
+                          duration_weeks,
+                          start_week,
+                          start_year,
+                          status,
+                          whitebox_category,
+                          type,
+                          (SELECT COUNT(*) FROM test_assets WHERE test_id = tests.id)
+                   FROM tests
+                   ''')
     all_tests = cursor.fetchall()
 
     backlog = []
     scheduled = []
     for t in all_tests:
         test_obj = {"id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], "startWeek": t[5],
-                    "startYear": t[6], "status": t[7], "whitebox_category": t[8]}
+                    "startYear": t[6], "status": t[7], "whitebox_category": t[8], "type": t[9], "asset_count": t[10]}
         if t[5] is None:
             backlog.append(test_obj)
         else:
