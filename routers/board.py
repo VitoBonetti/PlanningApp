@@ -132,27 +132,25 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
             test_assets_map[r[0]] = []
         test_assets_map[r[0]].append(r[1])
 
-    # Added 'status' to the SELECT query
+    # FIXED: Added whitebox_category to the SELECT statement to prevent the 500 error!
     cursor.execute(
-        'SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status FROM tests')
+        'SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category FROM tests')
     all_tests = cursor.fetchall()
 
     backlog = []
     scheduled = []
     for t in all_tests:
         test_obj = {
-            "id": t[0], "name": t[1], "service_id": t[2], 
-            "credits": t[3], "duration": t[4], 
-            "startWeek": t[5], "startYear": t[6], 
-            "status": t[7], "category": t[8] or "",
-            "asset_ids": test_assets_map.get(t[0], []) 
+            "id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], "startWeek": t[5],
+            "startYear": t[6], "status": t[7], "category": t[8] or "", 
+            "asset_ids": test_assets_map.get(t[0], [])
         }
         if t[5] is None:
             backlog.append(test_obj)
         else:
             scheduled.append(test_obj)
 
-    # NEW: Fetch all Events/Holidays for the reports
+    # Fetch all Events/Holidays for the reports
     cursor.execute('''
                    SELECT e.id, e.user_id, e.event_type, e.location, e.start_date, e.end_date, u.name
                    FROM events e
@@ -171,7 +169,7 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
         "pentesters": pentesters, "capacities": cap_matrix,
         "backlog": backlog, "scheduled": scheduled,
         "assignments": assignments,
-        "events": events  # <-- Added to the payload!
+        "events": events
     }
 
 
