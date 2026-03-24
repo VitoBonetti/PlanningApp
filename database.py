@@ -78,7 +78,7 @@ def init_db():
         is_assigned BOOLEAN DEFAULT 0,
         business_critical TEXT,
         kpi TEXT,
-        whitebox_category TEXT,
+        whitebox_category TEXT
         is_assigned BOOLEAN DEFAULT 0,
         UNIQUE ( inventory_id, ext_id, number )
         )
