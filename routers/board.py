@@ -124,7 +124,15 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
     assignments = [{"test_id": r[0], "user_id": r[1], "week_number": r[2], "allocated_credits": r[3], "user_name": r[4]}
                    for r in cursor.fetchall()]
 
-    # NEW: Added 'status' to the SELECT query
+    # NEW: Fetch test-to-asset mappings so the frontend knows which tests are manual
+    cursor.execute('SELECT test_id, asset_id FROM test_assets')
+    test_assets_map = {}
+    for r in cursor.fetchall():
+        if r[0] not in test_assets_map:
+            test_assets_map[r[0]] = []
+        test_assets_map[r[0]].append(r[1])
+
+    # Added 'status' to the SELECT query
     cursor.execute(
         'SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status FROM tests')
     all_tests = cursor.fetchall()
@@ -132,8 +140,13 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
     backlog = []
     scheduled = []
     for t in all_tests:
-        test_obj = {"id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], "startWeek": t[5],
-                    "startYear": t[6], "status": t[7]}
+        test_obj = {
+            "id": t[0], "name": t[1], "service_id": t[2], 
+            "credits": t[3], "duration": t[4], 
+            "startWeek": t[5], "startYear": t[6], 
+            "status": t[7], "category": t[8] or "",
+            "asset_ids": test_assets_map.get(t[0], []) 
+        }
         if t[5] is None:
             backlog.append(test_obj)
         else:
