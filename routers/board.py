@@ -124,33 +124,22 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
     assignments = [{"test_id": r[0], "user_id": r[1], "week_number": r[2], "allocated_credits": r[3], "user_name": r[4]}
                    for r in cursor.fetchall()]
 
-    # NEW: Fetch test-to-asset mappings so the frontend knows which tests are manual
-    cursor.execute('SELECT test_id, asset_id FROM test_assets')
-    test_assets_map = {}
-    for r in cursor.fetchall():
-        if r[0] not in test_assets_map:
-            test_assets_map[r[0]] = []
-        test_assets_map[r[0]].append(r[1])
-
-    # FIXED: Added whitebox_category to the SELECT statement to prevent the 500 error!
+    # NEW: Added 'status' to the SELECT query
     cursor.execute(
-        'SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category FROM tests')
+        'SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status FROM tests')
     all_tests = cursor.fetchall()
 
     backlog = []
     scheduled = []
     for t in all_tests:
-        test_obj = {
-            "id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], "startWeek": t[5],
-            "startYear": t[6], "status": t[7], "category": t[8] or "", 
-            "asset_ids": test_assets_map.get(t[0], [])
-        }
+        test_obj = {"id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], "startWeek": t[5],
+                    "startYear": t[6], "status": t[7]}
         if t[5] is None:
             backlog.append(test_obj)
         else:
             scheduled.append(test_obj)
 
-    # Fetch all Events/Holidays for the reports
+    # NEW: Fetch all Events/Holidays for the reports
     cursor.execute('''
                    SELECT e.id, e.user_id, e.event_type, e.location, e.start_date, e.end_date, u.name
                    FROM events e
@@ -169,7 +158,7 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
         "pentesters": pentesters, "capacities": cap_matrix,
         "backlog": backlog, "scheduled": scheduled,
         "assignments": assignments,
-        "events": events
+        "events": events  # <-- Added to the payload!
     }
 
 
