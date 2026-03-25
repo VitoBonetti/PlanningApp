@@ -7,6 +7,8 @@ import jwt
 from routers.auth import SECRET_KEY, ALGORITHM, limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
+import sqlite3
+from database import DB_FILE, init_db
 
 app = FastAPI(title="Pentest Planner API - PRO")
 
@@ -32,6 +34,10 @@ app.include_router(users.router)
 app.include_router(assets.router)
 app.include_router(tests.router)
 app.include_router(board.router)
+
+@app.on_event("startup")
+def startup_event():
+    init_db()
 
 # Websocket route
 @app.websocket("/ws/board")
