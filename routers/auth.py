@@ -53,17 +53,21 @@ def get_current_user(request: Request):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None: raise HTTPException(status_code=401, detail="Invalid token")
+        session_token: str = payload.get("session")
+        if username is None or session_token is None: 
+            raise HTTPException(status_code=401, detail="Invalid token structure")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, name, role, location FROM users WHERE username = ?", (username,))
+    cursor.execute("SELECT id, username, name, role, location, session_token FROM users WHERE username = ?", (username,))
     user = cursor.fetchone()
     conn.close()
 
-    if user is None: raise HTTPException(status_code=401, detail="User not found")
+    if user is None or user[5] != session_token: 
+        raise HTTPException(status_code=401, detail="Session expired or logged in elsewhere.")
+        
     return {"id": user[0], "username": user[1], "name": user[2], "role": user[3], "location": user[4]}
 
 
@@ -81,18 +85,25 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/token")
-def login_for_access_token(response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
+@limiter.limit("5/minute")
+def login_for_access_token(request: Request, response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, hashed_password, role, name FROM users WHERE username = ?",
-                   (form_data.username,))
-    user = fetchone = cursor.fetchone()
-    conn.close()
+    cursor.execute("SELECT id, username, hashed_password, role, name, location FROM users WHERE username = ?", (form_data.username,))
+    user = cursor.fetchone()
+    if not user or not verify_password(form_data.password, user[2]):
+        conn.close()
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     if not user or not verify_password(form_data.password, user[2]):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
-    access_token = create_access_token(data={"sub": user[1]})
+    new_session = str(uuid.uuid4())
+    cursor.execute("UPDATE users SET session_token = ? WHERE id = ?", (new_session, user[0]))
+    conn.commit()
+    conn.close()
+
+    access_token = create_access_token(data={"sub": user[1], "session": new_session})
 
     # Issue HttpOnly Cookie!
     response.set_cookie(
@@ -103,7 +114,7 @@ def login_for_access_token(response: Response, form_data: OAuth2PasswordRequestF
         samesite="lax",
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
-    return {"role": user[3], "name": user[4]}
+    return {"id": user[0], "role": user[3], "name": user[4], "location": user[5]}
 
 
 @router.post("/logout")
