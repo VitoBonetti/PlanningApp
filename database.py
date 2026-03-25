@@ -120,6 +120,29 @@ def init_db():
                      id
                  ))''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS notifications
+                      (
+                          id
+                          TEXT
+                          PRIMARY
+                          KEY,
+                          user_id
+                          TEXT,
+                          message
+                          TEXT,
+                          type
+                          TEXT,
+                          created_at
+                          TIMESTAMP
+                          DEFAULT
+                          CURRENT_TIMESTAMP,
+                          is_read
+                          BOOLEAN
+                          DEFAULT
+                          0
+                      )''')
+
+
     # Seed Default Service Lanes if the board is completely empty
     c.execute("SELECT COUNT(*) FROM services")
     if c.fetchone()[0] == 0:

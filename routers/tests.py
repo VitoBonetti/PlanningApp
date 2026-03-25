@@ -330,6 +330,14 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
     cursor.execute(
         'INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) VALUES (?, ?, ?, ?, ?, ?)',
         (new_id, assign.test_id, assign.user_id, assign.week_number, assign.year, actual_provided))
+
+    cursor.execute("SELECT name FROM tests WHERE id = ?", (assign.test_id,))
+    test_row = cursor.fetchone()
+    if test_row:
+        notif_id = str(uuid.uuid4())
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (?, ?, ?, ?)",
+                       (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
+                        "ASSIGNMENT"))
     conn.commit()
     conn.close()
     background_tasks.add_task(
@@ -349,6 +357,12 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    cursor.execute("SELECT name FROM tests WHERE id = ?", (test_id,))
+    test_row = cursor.fetchone()
+    if test_row:
+        notif_id = str(uuid.uuid4())
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (?, ?, ?, ?)",
+                       (notif_id, user_id, f"You were removed from {test_row[0]}.", "REMOVAL"))
     cursor.execute('DELETE FROM assignments WHERE test_id = ? AND user_id = ?', (test_id, user_id))
     conn.commit()
     conn.close()

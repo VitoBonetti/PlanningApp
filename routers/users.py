@@ -185,3 +185,22 @@ def change_own_password(
 
     return {"message": "Password changed successfully."}
 
+
+@router.get("/users/me/notifications")
+def get_my_notifications(current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, message, type, created_at FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC", (current_user['id'],))
+    notifs = [{"id": r[0], "message": r[1], "type": r[2], "created_at": r[3]} for r in cursor.fetchall()]
+    conn.close()
+    return notifs
+
+@router.put("/users/me/notifications/read")
+def mark_notifications_read(current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE notifications SET is_read = 1 WHERE user_id = ?", (current_user['id'],))
+    conn.commit()
+    conn.close()
+    return {"message": "Notifications marked as read."}
+
