@@ -44,6 +44,8 @@ def setup_first_admin(admin: FirstAdminSetup):
 @router.post("/users/")
 def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Only Admins can create new users.")
+    if u.role == 'read_only':
+        u.base_capacity = 0.0
     salt = bcrypt.gensalt()
     hashed_pw = bcrypt.hashpw(u.password.encode('utf-8'), salt).decode('utf-8')
     new_id = str(uuid.uuid4())
@@ -80,6 +82,8 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: d
 @router.put("/users/{user_id}")
 def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     if current_user['role'] != 'admin': raise HTTPException(status_code=403, detail="Admins only.")
+    if u.role == 'read_only':
+        u.base_capacity = 0.0
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute(

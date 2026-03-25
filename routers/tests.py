@@ -117,7 +117,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
 
 @router.delete("/tests/{test_id}")
 def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
+    if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Only Admins/Managers can delete tests.")
 
     conn = sqlite3.connect(DB_FILE)
@@ -145,7 +145,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: d
 
 @router.put("/tests/{test_id}")
 def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
+    if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Only Admins/Managers can edit tests.")
 
     conn = sqlite3.connect(DB_FILE)
@@ -168,7 +168,7 @@ def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, 
 
 @router.put("/tests/{test_id}/complete")
 def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
+    if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Only Admins/Managers can complete tests.")
 
     conn = sqlite3.connect(DB_FILE)
@@ -182,7 +182,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user:
 
 @router.post("/tests/{test_id}/duplicate")
 def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
+    if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Not authorized.")
 
     conn = sqlite3.connect(DB_FILE, timeout=10)
