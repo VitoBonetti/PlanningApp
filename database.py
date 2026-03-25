@@ -19,6 +19,11 @@ def init_db():
                      base_capacity REAL,
                      start_week INTEGER DEFAULT 1
                  )''')
+    
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN session_token TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
 
     c.execute('''CREATE TABLE IF NOT EXISTS services
                  (
