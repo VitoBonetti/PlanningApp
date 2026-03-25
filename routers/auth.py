@@ -7,8 +7,11 @@ import bcrypt
 import os
 from google.cloud import secretmanager
 from database import DB_FILE
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["Authentication"])
+limiter = Limiter(key_func=get_remote_address)
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120
