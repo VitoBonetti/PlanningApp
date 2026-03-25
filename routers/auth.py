@@ -16,7 +16,7 @@ PROJECT_ID = "planningapp-491007"
 
 
 def get_secret(secret_id, project_id):
-    # Fallback for local development so your app doesn't crash on your laptop
+    # Fallback ONLY for local development
     if os.environ.get("ENV") == "local":
         return "local-dev-secret-key"
 
@@ -26,9 +26,9 @@ def get_secret(secret_id, project_id):
         response = client.access_secret_version(request={"name": name})
         return response.payload.data.decode("UTF-8")
     except Exception as e:
-        print(f"Failed to fetch secret: {e}")
-        # Failsafe so the app still boots if GCP acts up, but warns you
-        return "fallback-insecure-key"
+        print(f"CRITICAL: Failed to fetch secret: {e}")
+        # FAIL SECURE: Crash the app instead of using an insecure key in production!
+        raise RuntimeError(f"Cannot start application without {secret_id}. Check GCP permissions.")
 
 
 SECRET_KEY = get_secret("JWT_SECRET_KEY", PROJECT_ID)
