@@ -59,6 +59,7 @@ async def websocket_endpoint(websocket: WebSocket):
             raise Exception("Session Invalidated")
             
     except Exception:
+        print(f"WebSocket Auth Failed: {e}") 
         await websocket.close(code=1008, reason="Invalid authentication token")
         return
 
