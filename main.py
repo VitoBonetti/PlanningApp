@@ -39,8 +39,20 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     try:
-        # Validate token
-        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        session_token = payload.get("session")
+
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT session_token FROM users WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        conn.close()
+
+        # Kick them off the WebSocket if the session is old
+        if not row or row[0] != session_token:
+            raise Exception("Session Invalidated")
+            
     except Exception:
         await websocket.close(code=1008, reason="Invalid authentication token")
         return
