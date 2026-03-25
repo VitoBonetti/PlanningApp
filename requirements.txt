@@ -9,3 +9,4 @@ bcrypt
 PyJWT
 google-cloud-secret-manager
 websockets
+slowapi
