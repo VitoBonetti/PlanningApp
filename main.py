@@ -4,7 +4,9 @@ from routers import auth, users, assets, tests, board
 from websockets_manager import manager
 from routers.auth import get_current_user
 import jwt
-from routers.auth import SECRET_KEY, ALGORITHM
+from routers.auth import SECRET_KEY, ALGORITHM, limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 app = FastAPI(title="Pentest Planner API - PRO")
 
@@ -20,6 +22,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Wire up all the separated routes!
 app.include_router(auth.router)
