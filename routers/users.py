@@ -85,7 +85,7 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute(
-        'UPDATE users SET name=?, role=?, location=?, base_capacity=?, start_week=? WHERE id=?',
+        'UPDATE users SET name=?, role=?, location=?, base_capacity=?, start_week=?, session_token=NULL WHERE id=?',
         (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
     conn.commit()
     conn.close()
@@ -109,7 +109,7 @@ def admin_reset_password(user_id: str, p: AdminPasswordReset, current_user: dict
 def change_own_password(p: PasswordChange, current_user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT hashed_password FROM users WHERE id = ?", (current_user['id'],))
+    cursor.execute('UPDATE users SET hashed_password=?, session_token=NULL WHERE id=?', (new_hashed_pw, current_user['id']))
     db_hash = cursor.fetchone()[0]
 
     if not verify_password(p.old_password, db_hash):
