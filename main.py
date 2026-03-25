@@ -58,7 +58,7 @@ async def websocket_endpoint(websocket: WebSocket):
         if not row or row[0] != session_token:
             raise Exception("Session Invalidated")
             
-    except Exception:
+    except Exception as e:
         print(f"WebSocket Auth Failed: {e}") 
         await websocket.close(code=1008, reason="Invalid authentication token")
         return
