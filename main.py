@@ -12,7 +12,7 @@ app = FastAPI(title="Pentest Planner API - PRO")
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",          # Local React dev server
-    "https://mffdawybwrgvpgxdrcjc.vitobonetti.nl/"  # Production frontend
+    "https://mffdawybwrgvpgxdrcjc.vitobonetti.nl"  # Dev frontend
 ]
 
 app.add_middleware(
