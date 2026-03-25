@@ -3,7 +3,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from database import DB_FILE
-from routers.auth import get_current_user
+from routers.auth import get_current_user, require_admin, require_write_access
 from models import EventCreate, EventUpdate
 from websockets_manager import manager
 
@@ -74,11 +74,19 @@ def calculate_weekly_capacity(user_id, year, week_number):
     return round(provision, 1)
 
 @router.post("/events/")
-def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_write_access)):
+    # 1. PENTESTER RULES: Force their own ID, block system-wide events
+    if current_user['role'] == 'pentester':
+        if e.event_type in ['national_holiday', 'team_day']:
+            raise HTTPException(status_code=403, detail="Only Admins can create National Holidays or Team Days.")
+        e.user_id = current_user['id']  # Forcibly assign the event to themselves!
+
+    # 2. ADMIN RULES: Format system-wide events
     if e.event_type in ['national_holiday', 'team_day']:
         e.user_id = None
     if e.event_type == 'team_day':
         e.location = 'Global'
+
     new_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -91,27 +99,57 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user
 
 
 @router.put("/events/{event_id}")
-def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTasks,
+                 current_user: dict = Depends(require_write_access)):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+
+    # 1. PENTESTER RULES: Check ownership before allowing edit
+    if current_user['role'] == 'pentester':
+        c.execute("SELECT user_id, event_type FROM events WHERE id = ?", (event_id,))
+        row = c.fetchone()
+        if not row or row[0] != current_user['id'] or row[1] in ['national_holiday', 'team_day']:
+            conn.close()
+            raise HTTPException(status_code=403, detail="You can only edit your own personal time off.")
+
+        if e.event_type in ['national_holiday', 'team_day']:
+            conn.close()
+            raise HTTPException(status_code=403, detail="You cannot change a personal holiday to a system-wide event.")
+
+        e.user_id = current_user['id']  # Forcibly keep the event assigned to themselves
+
+    # 2. ADMIN RULES: Format system-wide events
     if e.event_type in ['national_holiday', 'team_day']:
         e.user_id = None
     if e.event_type == 'team_day':
         e.location = 'Global'
-    conn = sqlite3.connect(DB_FILE); c = conn.cursor()
-    c.execute('UPDATE events SET user_id=?, event_type=?, location=?, start_date=?, end_date=? WHERE id=?', (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
-    conn.commit(); conn.close()
+
+    c.execute('UPDATE events SET user_id=?, event_type=?, location=?, start_date=?, end_date=? WHERE id=?',
+              (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
+    conn.commit()
+    conn.close()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday updated"}
 
 
-# Delete a holiday
 @router.delete("/events/{event_id}")
-def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    conn = sqlite3.connect(DB_FILE); c = conn.cursor()
+def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_write_access)):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+
+    # 1. PENTESTER RULES: Check ownership before allowing delete
+    if current_user['role'] == 'pentester':
+        c.execute("SELECT user_id, event_type FROM events WHERE id = ?", (event_id,))
+        row = c.fetchone()
+        if not row or row[0] != current_user['id'] or row[1] in ['national_holiday', 'team_day']:
+            conn.close()
+            raise HTTPException(status_code=403, detail="You can only delete your own personal time off.")
+
     c.execute('DELETE FROM events WHERE id=?', (event_id,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday deleted"}
-
 
 @router.get("/board/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(get_current_user)):
@@ -194,9 +232,7 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
 
 
 @router.delete("/system/wipe")
-def wipe_system(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Only Admins can wipe the system.")
+def wipe_system(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()

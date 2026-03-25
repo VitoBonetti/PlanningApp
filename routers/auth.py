@@ -67,6 +67,19 @@ def get_current_user(request: Request):
     return {"id": user[0], "username": user[1], "name": user[2], "role": user[3], "location": user[4]}
 
 
+def require_admin(current_user: dict = Depends(get_current_user)):
+    """Strictly locks an endpoint to Admins only."""
+    if current_user.get('role') != 'admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required.")
+    return current_user
+
+def require_write_access(current_user: dict = Depends(get_current_user)):
+    """Allows Admins and Pentesters (e.g., to book their own holidays), blocks Read-Only."""
+    if current_user.get('role') == 'read_only':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Read-only account cannot perform this action.")
+    return current_user
+
+
 @router.post("/token")
 def login_for_access_token(response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
     conn = sqlite3.connect(DB_FILE)

@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import List
 from database import DB_FILE
-from routers.auth import get_current_user
+from routers.auth import get_current_user, require_admin
 
 router = APIRouter(tags=["Assets"])
 
@@ -68,16 +68,39 @@ def process_excel_background(contents: bytes):
 
 @router.post("/assets/import")
 async def import_assets(background_tasks: BackgroundTasks, file: UploadFile = File(...),
-                        current_user: dict = Depends(get_current_user)):
-    if current_user['role'] not in ['admin', 'manager']:
-        raise HTTPException(status_code=403, detail="Only Admins/Managers can import assets.")
+                        current_user: dict = Depends(require_admin)):
+
     contents = await file.read()
+
+    # block files larger than 5MB
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 5MB.")
+
+    # magic Number Validation (File Signature)
+    # .xls (OLE2) signature: D0 CF 11 E0 A1 B1 1A E1
+    # .xlsx (ZIP) signature: 50 4B 03 04
+    XLS_MAGIC = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
+    XLSX_MAGIC = b'\x50\x4b\x03\x04'
+
+    is_valid_signature = contents.startswith(XLS_MAGIC) or contents.startswith(XLSX_MAGIC)
+
+    if not is_valid_signature:
+        raise HTTPException(
+            status_code=400,
+            detail="Security Alert: Invalid file signature. This is not a genuine Excel file."
+        )
+
+    # fallback Extension Check
+    if not file.filename.endswith(('.xls', '.xlsx')):
+        raise HTTPException(status_code=400, detail="Invalid extension. Please use .xls or .xlsx")
+
     background_tasks.add_task(process_excel_background, contents)
     return {"message": "Excel file received! Importing in the background."}
 
 
 @router.get("/assets/")
-def get_available_assets(current_user: dict = Depends(get_current_user)):
+def get_available_assets(current_user: dict = Depends(require_admin)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 

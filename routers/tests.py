@@ -4,7 +4,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from database import DB_FILE
-from routers.auth import get_current_user
+from routers.auth import get_current_user, require_admin
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
 from websockets_manager import manager
 
@@ -12,9 +12,7 @@ router = APIRouter(tags=["Tests & Assignments"])
 
 
 @router.post("/tests/")
-def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] == 'read_only':
-        raise HTTPException(status_code=403, detail="Read Only")
+def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     new_id = str(uuid.uuid4())
 
@@ -82,14 +80,13 @@ def process_bulk_tests_background(asset_ids: List[str]):
 # Triggers Bulk Generation ---
 @router.post("/tests/bulk")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
-                      current_user: dict = Depends(get_current_user)):
-    if current_user['role'] == 'read_only': raise HTTPException(status_code=403, detail="Read Only")
+                      current_user: dict = Depends(require_admin)):
 
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids)
     return {"message": f"Generating {len(req.asset_ids)} tests in the background!"}
 
 @router.put("/tests/{test_id}/schedule")
-def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('UPDATE tests SET start_week = ?, start_year = ?, status = "Planned" WHERE id = ?', (schedule.start_week, schedule.start_year, test_id))
@@ -103,7 +100,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 
 
 @router.put("/tests/{test_id}/unschedule")
-def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE test_id = ?', (test_id,))
@@ -116,9 +113,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
 
 
 @router.delete("/tests/{test_id}")
-def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Only Admins/Managers can delete tests.")
+def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -144,9 +139,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: d
 
 
 @router.put("/tests/{test_id}")
-def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Only Admins/Managers can edit tests.")
+def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(require_admin)):
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -167,9 +160,7 @@ def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, 
 
 
 @router.put("/tests/{test_id}/complete")
-def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Only Admins/Managers can complete tests.")
+def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -181,9 +172,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user:
 
 
 @router.post("/tests/{test_id}/duplicate")
-def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Not authorized.")
+def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     conn = sqlite3.connect(DB_FILE, timeout=10)
     cursor = conn.cursor()
@@ -218,7 +207,7 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
 
 
 @router.post("/assignments/")
-def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
@@ -274,7 +263,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 
 
 @router.delete("/assignments/{test_id}/{user_id}")
-def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE test_id = ? AND user_id = ?', (test_id, user_id))
