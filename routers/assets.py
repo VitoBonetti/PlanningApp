@@ -100,7 +100,9 @@ async def import_assets(background_tasks: BackgroundTasks, file: UploadFile = Fi
 
 
 @router.get("/assets/")
-def get_available_assets(current_user: dict = Depends(require_admin)):
+def get_available_assets(current_user: dict = Depends(get_current_user)):
+    if current_user['role'] == 'pentester':
+        raise HTTPException(status_code=403, detail="Pentesters cannot view the asset inventory.")
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
