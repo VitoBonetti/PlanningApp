@@ -12,6 +12,10 @@ from database import DB_FILE, init_db
 
 app = FastAPI(title="Pentest Planner API - PRO")
 
+@app.on_event("startup")
+def startup_event():
+    init_db()
+
 ALLOWED_ORIGINS = [
     "http://localhost:5173",          # Local React dev server
     "https://mffdawybwrgvpgxdrcjc.vitobonetti.nl"  # Dev frontend
@@ -34,10 +38,6 @@ app.include_router(users.router)
 app.include_router(assets.router)
 app.include_router(tests.router)
 app.include_router(board.router)
-
-@app.on_event("startup")
-def startup_event():
-    init_db()
 
 # Websocket route
 @app.websocket("/ws/board")
