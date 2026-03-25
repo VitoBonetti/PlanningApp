@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import auth, users, assets, tests, board
 from websockets_manager import manager
 from routers.auth import get_current_user
+import jwt
+from routers.auth import SECRET_KEY, ALGORITHM
 
 app = FastAPI(title="Pentest Planner API - PRO")
 
@@ -29,25 +31,23 @@ app.include_router(board.router)
 # Websocket route
 @app.websocket("/ws/board")
 @app.websocket("/api/ws/board")
-async def websocket_endpoint(websocket: WebSocket, token: str = Query(None)):
-    # Reject connection if no token is provided
+async def websocket_endpoint(websocket: WebSocket):
+    token = websocket.cookies.get("access_token")
+
     if not token:
         await websocket.close(code=1008, reason="Missing authentication token")
         return
 
     try:
-        # Validate the token using the existing auth logic
-        user = get_current_user(token)
+        # Validate token
+        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except Exception:
-        # Reject connection if token is invalid or expired
         await websocket.close(code=1008, reason="Invalid authentication token")
         return
 
-    # If valid, accept the connection
     await manager.connect(websocket)
     try:
         while True:
-            # We keep the connection alive and listen for disconnects
             data = await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Response, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import sqlite3
 import jwt
@@ -45,16 +45,17 @@ def create_access_token(data: dict):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                                          detail="Could not validate credentials",
-                                          headers={"WWW-Authenticate": "Bearer"})
+def get_current_user(request: Request):
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None: raise credentials_exception
+        if username is None: raise HTTPException(status_code=401, detail="Invalid token")
     except jwt.InvalidTokenError:
-        raise credentials_exception
+        raise HTTPException(status_code=401, detail="Invalid token")
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -62,21 +63,37 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     user = cursor.fetchone()
     conn.close()
 
-    if user is None: raise credentials_exception
+    if user is None: raise HTTPException(status_code=401, detail="User not found")
     return {"id": user[0], "username": user[1], "name": user[2], "role": user[3], "location": user[4]}
 
 
 @router.post("/token")
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+def login_for_access_token(response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT id, username, hashed_password, role, name FROM users WHERE username = ?",
                    (form_data.username,))
-    user = cursor.fetchone()
+    user = fetchone = cursor.fetchone()
     conn.close()
 
     if not user or not verify_password(form_data.password, user[2]):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     access_token = create_access_token(data={"sub": user[1]})
-    return {"access_token": access_token, "token_type": "bearer", "role": user[3], "name": user[4]}
+
+    # Issue HttpOnly Cookie!
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
+    return {"role": user[3], "name": user[4]}
+
+
+@router.post("/logout")
+def logout(response: Response):
+    response.delete_cookie("access_token")
+    return {"message": "Logged out"}
