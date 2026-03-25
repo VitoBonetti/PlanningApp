@@ -6,6 +6,7 @@ from database import DB_FILE
 from routers.auth import get_current_user, require_admin, require_write_access
 from models import EventCreate, EventUpdate
 from websockets_manager import manager
+from audit_logger import log_audit_event
 
 router = APIRouter(tags=["Board & Events"])
 
@@ -94,6 +95,14 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user
               (new_id, e.user_id, e.event_type, e.location, e.start_date, e.end_date))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="CREATE_EVENT",
+        resource_type="EVENT",
+        details="The Holiday has been created."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
 
@@ -128,6 +137,14 @@ def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTask
               (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="UPDATE_EVENT",
+        resource_type="EVENT",
+        details="The Holiday has been Updated."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday updated"}
 
@@ -148,6 +165,14 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user:
     c.execute('DELETE FROM events WHERE id=?', (event_id,))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="DELETE_EVENT",
+        resource_type="EVENT",
+        details="The Holiday has been deleted."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday deleted"}
 
@@ -246,6 +271,14 @@ def wipe_system(background_tasks: BackgroundTasks, current_user: dict = Depends(
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="SYSTEM_WIPE",
+        resource_type="SYSTEM",
+        details="Triggered full database wipe (Tests, Assignments, Events cleared)."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Board wiped clean, all assets freed!"}
 

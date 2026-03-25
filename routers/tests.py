@@ -7,6 +7,7 @@ from database import DB_FILE
 from routers.auth import get_current_user, require_admin
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
 from websockets_manager import manager
+from audit_logger import log_audit_event
 
 router = APIRouter(tags=["Tests & Assignments"])
 
@@ -33,6 +34,15 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: 
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="CREATE_TEST",
+        resource_type="TEST",
+        resource_id=new_id,
+        details=f"Created new test: {t.name}"
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok", "id": new_id}
 
@@ -82,7 +92,16 @@ def process_bulk_tests_background(asset_ids: List[str]):
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
 
+
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids)
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="BULK_CREATE_TESTS",
+        resource_type="TEST_BATCH",
+        details=f"Initiated background generation of {len(req.asset_ids)} tests from assets."
+    )
     return {"message": f"Generating {len(req.asset_ids)} tests in the background!"}
 
 @router.put("/tests/{test_id}/schedule")
@@ -92,6 +111,16 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
     cursor.execute('UPDATE tests SET start_week = ?, start_year = ?, status = "Planned" WHERE id = ?', (schedule.start_week, schedule.start_year, test_id))
     conn.commit()
     conn.close()
+
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="SCHEDULE_TEST",
+        resource_type="TEST",
+        resource_id=test_id,
+        details=f"Scheduled test for Week {schedule.start_week}, {schedule.start_year}."
+    )
 
     # THE MAGIC: Tell everyone else to refresh their screen!
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
@@ -108,6 +137,15 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
                    (test_id,))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="UNSCHEDULE_TEST",
+        resource_type="TEST",
+        resource_id=test_id,
+        details="Moved test back to backlog and cleared assignments."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unscheduled"}
 
@@ -134,6 +172,15 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: d
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="DELETE_TEST",
+        resource_type="TEST",
+        resource_id=test_id,
+        details=f"Permanently delete test: {test_id}"
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test permanently deleted and assets freed."}
 
@@ -155,6 +202,15 @@ def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, 
         (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="UPDATE_TEST",
+        resource_type="TEST",
+        resource_id=test_id,
+        details=f"Updated test attributes."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test updated successfully."}
 
@@ -167,6 +223,15 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user:
     cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = ?", (test_id,))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="COMPLETE_TEST",
+        resource_type="TEST",
+        resource_id=test_id,
+        details="Marked test as Completed."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test marked as Completed."}
 
@@ -202,6 +267,15 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
 
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="DUPLICATE_TEST",
+        resource_type="TEST",
+        resource_id=new_test_id,  # Use the ID of the newly created clone
+        details=f"Duplicated test from original ID: {test_id}"
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Project duplicated to the Backlog!"}
 
@@ -258,6 +332,15 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
         (new_id, assign.test_id, assign.user_id, assign.week_number, assign.year, actual_provided))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="ASSIGN_PENTESTER",
+        resource_type="ASSIGNMENT",
+        resource_id=assign.test_id,
+        details=f"Assigned user {assign.user_id} to test for Week {assign.week_number}."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Assigned"}
 
@@ -269,5 +352,14 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
     cursor.execute('DELETE FROM assignments WHERE test_id = ? AND user_id = ?', (test_id, user_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="REMOVE_ASSIGNMENT",
+        resource_type="ASSIGNMENT",
+        resource_id=test_id,
+        details=f"Removed user {user_id} from test."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unassigned"}

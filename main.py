@@ -9,12 +9,14 @@ from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 import sqlite3
 from database import DB_FILE, init_db
+from audit_logger import init_audit_log_infrastructure
 
 app = FastAPI(title="Pentest Planner API - PRO")
 
 @app.on_event("startup")
 def startup_event():
     init_db()
+    init_audit_log_infrastructure()
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",          # Local React dev server

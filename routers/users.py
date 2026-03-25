@@ -6,6 +6,7 @@ from database import DB_FILE
 from routers.auth import get_current_user, verify_password, require_admin
 from models import UserCreateSecure, UserUpdate, PasswordChange, AdminPasswordReset, FirstAdminSetup
 from websockets_manager import manager
+from audit_logger import log_audit_event
 
 router = APIRouter(tags=["Users"])
 
@@ -58,6 +59,15 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_
             (new_id, u.username, hashed_pw, u.name, u.role, u.location, u.base_capacity, u.start_week))
         conn.commit()
         conn.close()
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="CREATE_USER",
+            resource_type="USER",
+            resource_id=u.username,
+            details=f"Created {u.role} account for {u.name}"
+        )
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
         return {"message": f"User {u.name} created."}
     except sqlite3.IntegrityError:
@@ -74,6 +84,15 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: d
     cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="DELETE_USER",
+        resource_type="USER",
+        resource_id=user_id,
+        details="Permanently deleted user account."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "User deleted."}
 
@@ -89,12 +108,21 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, 
         (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="UPDATE_USER",
+        resource_type="USER",
+        resource_id=user_id,
+        details="Updated user account."
+    )
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "User updated."}
 
 
 @router.put("/users/{user_id}/reset-password")
-def admin_reset_password(user_id: str, p: AdminPasswordReset, current_user: dict = Depends(require_admin)):
+def admin_reset_password(user_id: str, p: AdminPasswordReset, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     salt = bcrypt.gensalt()
     hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
     conn = sqlite3.connect(DB_FILE)
@@ -102,24 +130,58 @@ def admin_reset_password(user_id: str, p: AdminPasswordReset, current_user: dict
     cursor.execute('UPDATE users SET hashed_password=? WHERE id=?', (hashed_pw, user_id))
     conn.commit()
     conn.close()
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="PSW_RESET",
+        resource_type="USER",
+        resource_id=user_id,
+        details="Password has been reset."
+    )
     return {"message": "User password reset successfully."}
 
 
 @router.put("/users/me/password")
-def change_own_password(p: PasswordChange, current_user: dict = Depends(get_current_user)):
+def change_own_password(
+        p: PasswordChange,
+        background_tasks: BackgroundTasks,  # <-- Added for the logger
+        current_user: dict = Depends(get_current_user)
+):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute('UPDATE users SET hashed_password=?, session_token=NULL WHERE id=?', (new_hashed_pw, current_user['id']))
-    db_hash = cursor.fetchone()[0]
 
-    if not verify_password(p.old_password, db_hash):
+    # 1. Fetch the CURRENT password hash from the database to verify it
+    cursor.execute("SELECT hashed_password FROM users WHERE id = ?", (current_user['id'],))
+    row = cursor.fetchone()
+
+    # If the user doesn't exist or the old password doesn't match, reject them!
+    if not row or not verify_password(p.old_password, row[0]):
         conn.close()
         raise HTTPException(status_code=400, detail="Incorrect old password.")
 
+    # 2. Hash the NEW password
     salt = bcrypt.gensalt()
     new_hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
-    cursor.execute('UPDATE users SET hashed_password=? WHERE id=?', (new_hashed_pw, current_user['id']))
+
+    # 3. UPDATE the password and WIPE the session_token to log out other devices
+    cursor.execute(
+        'UPDATE users SET hashed_password=?, session_token=NULL WHERE id=?',
+        (new_hashed_pw, current_user['id'])
+    )
     conn.commit()
     conn.close()
+
+    # 4. Stream the event to BigQuery!
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="CHANGE_PASSWORD",
+        resource_type="USER",
+        resource_id=current_user["id"],
+        details="User successfully changed their own password."
+    )
+
     return {"message": "Password changed successfully."}
 

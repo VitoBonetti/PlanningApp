@@ -3,9 +3,9 @@ import pandas as pd
 import io
 import sqlite3
 import uuid
-from typing import List
 from database import DB_FILE
 from routers.auth import get_current_user, require_admin
+from audit_logger import log_audit_event
 
 router = APIRouter(tags=["Assets"])
 
@@ -96,6 +96,14 @@ async def import_assets(background_tasks: BackgroundTasks, file: UploadFile = Fi
         raise HTTPException(status_code=400, detail="Invalid extension. Please use .xls or .xlsx")
 
     background_tasks.add_task(process_excel_background, contents)
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="IMPORT_ASSETS",
+        resource_type="ASSET_BATCH",
+        details=f"Initiated background import of asset file: {file.filename}"
+    )
     return {"message": "Excel file received! Importing in the background."}
 
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Response, Request
+from fastapi import APIRouter, HTTPException, Depends, status, Response, Request, BackgroundTasks
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import sqlite3
 import jwt
@@ -10,6 +10,7 @@ from database import DB_FILE
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import uuid
+from audit_logger import log_audit_event
 
 router = APIRouter(tags=["Authentication"])
 limiter = Limiter(key_func=get_remote_address)
@@ -37,6 +38,7 @@ def get_secret(secret_id, project_id):
 
 SECRET_KEY = get_secret("JWT_SECRET_KEY", PROJECT_ID)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
 
 def verify_password(plain_password, hashed_password):
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
@@ -81,6 +83,7 @@ def require_admin(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required.")
     return current_user
 
+
 def require_write_access(current_user: dict = Depends(get_current_user)):
     """Allows Admins and Pentesters (e.g., to book their own holidays), blocks Read-Only."""
     if current_user.get('role') == 'read_only':
@@ -90,7 +93,7 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 
 @router.post("/token")
 @limiter.limit("5/minute")
-def login_for_access_token(request: Request, response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
+def login_for_access_token(request: Request, response: Response, background_tasks: BackgroundTasks, form_data: OAuth2PasswordRequestForm = Depends()):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT id, username, hashed_password, role, name, location FROM users WHERE username = ?", (form_data.username,))
@@ -118,10 +121,27 @@ def login_for_access_token(request: Request, response: Response, form_data: OAut
         samesite="lax",
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
+
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=user[0],
+        username=user[1],
+        action="LOGIN",
+        resource_type="SESSION",
+        details="User successfully authenticated."
+    )
+
     return {"id": user[0], "role": user[3], "name": user[4], "location": user[5]}
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(response: Response, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     response.delete_cookie("access_token")
-    return {"message": "Logged out"}
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="LOGOUT",
+        resource_type="SESSION"
+    )
+    return {"message": "Successfully logged out"}

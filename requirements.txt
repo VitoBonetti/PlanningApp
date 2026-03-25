@@ -10,3 +10,4 @@ PyJWT
 google-cloud-secret-manager
 websockets
 slowapi
+google-cloud-bigquery
