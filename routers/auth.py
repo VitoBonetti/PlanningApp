@@ -9,6 +9,7 @@ from google.cloud import secretmanager
 from database import DB_FILE
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+import uuid
 
 router = APIRouter(tags=["Authentication"])
 limiter = Limiter(key_func=get_remote_address)
