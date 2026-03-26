@@ -89,7 +89,7 @@ def login_for_access_token(request: Request, response: Response, background_task
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     new_session = str(uuid.uuid4())
-    cursor.execute("UPDATE users SET session_token = ? WHERE id = ?", (new_session, user[0]))
+    cursor.execute("UPDATE users SET session_token = %s WHERE id = %s", (new_session, user[0]))
     conn.commit()
     conn.close()
 

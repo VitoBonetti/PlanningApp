@@ -14,7 +14,7 @@ router = APIRouter(tags=["Board & Events"])
 def get_user_provision_internal(cursor, user_id, year, week_number):
     """Calculates exactly how much capacity a user provides in a specific week,
     accounting for holidays and their start date."""
-    cursor.execute('SELECT base_capacity, location, start_week FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT base_capacity, location, start_week FROM users WHERE id = %s', (user_id,))
     user_data = cursor.fetchone()
     if not user_data: return 0.0
     base_cap, user_location, start_week = user_data
@@ -26,8 +26,8 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     cursor.execute("""
                    SELECT start_date, end_date
                    FROM events
-                   WHERE user_id = ?
-                      OR (event_type = 'national_holiday' AND (location = ? OR location = 'Global'))
+                   WHERE user_id = %s
+                      OR (event_type = 'national_holiday' AND (location = %s OR location = 'Global'))
                       OR event_type = 'team_day'
                    """, (user_id, user_location))
     events = cursor.fetchall()
@@ -91,7 +91,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user
     new_id = str(uuid.uuid4())
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('INSERT INTO events (id, user_id, event_type, location, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)',
+    c.execute('INSERT INTO events (id, user_id, event_type, location, start_date, end_date) VALUES (%s, %s, %s, %s, %s, %s)',
               (new_id, e.user_id, e.event_type, e.location, e.start_date, e.end_date))
     conn.commit()
     conn.close()
@@ -115,7 +115,7 @@ def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTask
 
     # 1. PENTESTER RULES: Check ownership before allowing edit
     if current_user['role'] == 'pentester':
-        c.execute("SELECT user_id, event_type FROM events WHERE id = ?", (event_id,))
+        c.execute("SELECT user_id, event_type FROM events WHERE id = %s", (event_id,))
         row = c.fetchone()
         if not row or row[0] != current_user['id'] or row[1] in ['national_holiday', 'team_day']:
             conn.close()
@@ -133,7 +133,7 @@ def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTask
     if e.event_type == 'team_day':
         e.location = 'Global'
 
-    c.execute('UPDATE events SET user_id=?, event_type=?, location=?, start_date=?, end_date=? WHERE id=?',
+    c.execute('UPDATE events SET user_id=%s, event_type=%s, location=%s, start_date=%s, end_date=%s WHERE id=%s',
               (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
     conn.commit()
     conn.close()
@@ -156,13 +156,13 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user:
 
     # 1. PENTESTER RULES: Check ownership before allowing delete
     if current_user['role'] == 'pentester':
-        c.execute("SELECT user_id, event_type FROM events WHERE id = ?", (event_id,))
+        c.execute("SELECT user_id, event_type FROM events WHERE id = %s", (event_id,))
         row = c.fetchone()
         if not row or row[0] != current_user['id'] or row[1] in ['national_holiday', 'team_day']:
             conn.close()
             raise HTTPException(status_code=403, detail="You can only delete your own personal time off.")
 
-    c.execute('DELETE FROM events WHERE id=?', (event_id,))
+    c.execute('DELETE FROM events WHERE id=%s', (event_id,))
     conn.commit()
     conn.close()
     background_tasks.add_task(
