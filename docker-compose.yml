@@ -3,13 +3,10 @@ services:
     image: postgres:15-alpine
     restart: always
     environment:
-      - ENV=${ENV:-production}
-      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
-      - SETUP_DB_HOST=db
-      - SETUP_DB_PORT=5432
-      - SETUP_DB_USER=${POSTGRES_USER}
-      - SETUP_DB_PASS=${POSTGRES_PASSWORD}
-      - SETUP_DB_NAME=${POSTGRES_DB}
+      # The database needs these specific names to turn on correctly!
+      POSTGRES_USER: ${POSTGRES_USER:-erp_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-pentest_planner}
     ports:
       - "5432:5432"
     volumes:
@@ -23,6 +20,12 @@ services:
     environment:
       - ENV=${ENV:-production}
       - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      # The backend needs the SETUP variables so it can read them on Day 0!
+      - SETUP_DB_HOST=db
+      - SETUP_DB_PORT=5432
+      - SETUP_DB_USER=${POSTGRES_USER}
+      - SETUP_DB_PASS=${POSTGRES_PASSWORD}
+      - SETUP_DB_NAME=${POSTGRES_DB}
     depends_on:
       - db
     volumes:
