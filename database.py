@@ -25,6 +25,11 @@ def get_db_connection():
 
 def init_db():
     conn = get_db_connection()
+
+    if conn is None:
+        print("Skipping DB initialization (Day 0 Setup Mode active)")
+        return
+
     c = conn.cursor()
 
     # Core Tables
