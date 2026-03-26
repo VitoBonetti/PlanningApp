@@ -90,7 +90,13 @@ def execute_system_setup(payload: SetupPayload):
     hashed_pw = bcrypt.hashpw(payload.admin_password.encode('utf-8'), salt).decode('utf-8')
     admin_id = secrets.token_hex(8)
 
-    conn = psycopg2.connect(**{k.replace('db_', ''): v for k, v in master_config.items() if k.startswith('db_')})
+    conn = psycopg2.connect(
+        host=master_config["db_host"],
+        port=master_config["db_port"],
+        user=master_config["db_user"],
+        password=master_config["db_pass"],
+        dbname=master_config["db_name"]
+    )
     cursor = conn.cursor()
     cursor.execute(
         "INSERT INTO users (id, username, hashed_password, role, name, location, base_capacity) VALUES (%s, %s, %s, %s, %s, %s, %s)",
