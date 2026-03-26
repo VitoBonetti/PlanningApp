@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import sqlite3
 import uuid
 import bcrypt
-from database import DB_FILE
+from database import get_db_connection
 from routers.auth import get_current_user, verify_password, require_admin
 from models import UserCreateSecure, UserUpdate, PasswordChange, AdminPasswordReset, FirstAdminSetup
 from websockets_manager import manager
@@ -13,7 +13,7 @@ router = APIRouter(tags=["Users"])
 
 @router.get("/system/status")
 def check_system_status():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
     count = cursor.fetchone()[0]
@@ -23,7 +23,7 @@ def check_system_status():
 
 @router.post("/system/setup")
 def setup_first_admin(admin: FirstAdminSetup):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
     if cursor.fetchone()[0] > 0:
@@ -51,7 +51,7 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_
     hashed_pw = bcrypt.hashpw(u.password.encode('utf-8'), salt).decode('utf-8')
     new_id = str(uuid.uuid4())
     try:
-        conn = sqlite3.connect(DB_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         # NEW: Added start_week
         cursor.execute(
@@ -77,7 +77,7 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_
 # Delete User Endpoint
 @router.delete("/users/{user_id}")
 def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE user_id = ?', (user_id,))
     cursor.execute('DELETE FROM events WHERE user_id = ?', (user_id,))
@@ -101,7 +101,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: d
 def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     if u.role == 'read_only':
         u.base_capacity = 0.0
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         'UPDATE users SET name=?, role=?, location=?, base_capacity=?, start_week=?, session_token=NULL WHERE id=?',
@@ -125,7 +125,7 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, 
 def admin_reset_password(user_id: str, p: AdminPasswordReset, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     salt = bcrypt.gensalt()
     hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('UPDATE users SET hashed_password=? WHERE id=?', (hashed_pw, user_id))
     conn.commit()
@@ -148,7 +148,7 @@ def change_own_password(
         background_tasks: BackgroundTasks,  # <-- Added for the logger
         current_user: dict = Depends(get_current_user)
 ):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     # 1. Fetch the CURRENT password hash from the database to verify it
@@ -188,7 +188,7 @@ def change_own_password(
 
 @router.get("/users/me/notifications")
 def get_my_notifications(current_user: dict = Depends(get_current_user)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, message, type, created_at FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC", (current_user['id'],))
     notifs = [{"id": r[0], "message": r[1], "type": r[2], "created_at": r[3]} for r in cursor.fetchall()]
@@ -197,7 +197,7 @@ def get_my_notifications(current_user: dict = Depends(get_current_user)):
 
 @router.put("/users/me/notifications/read")
 def mark_notifications_read(current_user: dict = Depends(get_current_user)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE notifications SET is_read = 1 WHERE user_id = ?", (current_user['id'],))
     conn.commit()

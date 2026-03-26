@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
-from database import DB_FILE
+from database import get_db_connection
 from routers.auth import get_current_user, require_admin, require_write_access
 from models import EventCreate, EventUpdate
 from websockets_manager import manager
@@ -57,7 +57,7 @@ def get_quarter_weeks(q: int):
 
 
 def calculate_weekly_capacity(user_id, year, week_number):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     # Calculate what the user COULD provide
@@ -89,7 +89,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user
         e.location = 'Global'
 
     new_id = str(uuid.uuid4())
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('INSERT INTO events (id, user_id, event_type, location, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)',
               (new_id, e.user_id, e.event_type, e.location, e.start_date, e.end_date))
@@ -110,7 +110,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user
 @router.put("/events/{event_id}")
 def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # 1. PENTESTER RULES: Check ownership before allowing edit
@@ -151,7 +151,7 @@ def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTask
 
 @router.delete("/events/{event_id}")
 def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_write_access)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # 1. PENTESTER RULES: Check ownership before allowing delete
@@ -179,7 +179,7 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user:
 @router.get("/board/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(get_current_user)):
     weeks = list(get_quarter_weeks(quarter))
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('SELECT id, name, max_concurrent_per_week FROM services')
@@ -259,7 +259,7 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
 @router.delete("/system/wipe")
 def wipe_system(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments')
     cursor.execute('DELETE FROM tests')

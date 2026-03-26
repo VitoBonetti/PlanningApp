@@ -3,7 +3,7 @@ from typing import List
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
-from database import DB_FILE
+from database import get_db_connection
 from routers.auth import get_current_user, require_admin
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
 from websockets_manager import manager
@@ -17,7 +17,7 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: 
 
     new_id = str(uuid.uuid4())
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute(
         'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -106,7 +106,7 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
 
 @router.put("/tests/{test_id}/schedule")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('UPDATE tests SET start_week = ?, start_year = ?, status = "Planned" WHERE id = ?', (schedule.start_week, schedule.start_year, test_id))
     conn.commit()
@@ -130,7 +130,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 
 @router.put("/tests/{test_id}/unschedule")
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE test_id = ?', (test_id,))
     cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = "Not Planned" WHERE id = ?',
@@ -153,7 +153,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
 @router.delete("/tests/{test_id}")
 def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     # 1. NEW: Find all assets attached to this test and free them!
@@ -188,7 +188,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: d
 @router.put("/tests/{test_id}")
 def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(require_admin)):
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     # If an Admin forces the status back to 'Not Planned', we must clear it off the board!
@@ -218,7 +218,7 @@ def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, 
 @router.put("/tests/{test_id}/complete")
 def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = ?", (test_id,))
     conn.commit()
@@ -282,7 +282,7 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
 
 @router.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     # NEW RULE: Prevent double booking for this week!
@@ -355,7 +355,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 
 @router.delete("/assignments/{test_id}/{user_id}")
 def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM tests WHERE id = ?", (test_id,))
     test_row = cursor.fetchone()

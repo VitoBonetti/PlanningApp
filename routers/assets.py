@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import sqlite3
 import uuid
-from database import DB_FILE
+from database import get_db_connection
 from routers.auth import get_current_user, require_admin
 from audit_logger import log_audit_event
 
@@ -21,7 +21,7 @@ def process_excel_background(contents: bytes):
             df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
         df = df.fillna('')
 
-        conn = sqlite3.connect(DB_FILE, timeout=10)
+        conn = get_db_connection()
         cursor = conn.cursor()
 
         for index, row in df.iterrows():
@@ -111,7 +111,7 @@ async def import_assets(background_tasks: BackgroundTasks, file: UploadFile = Fi
 def get_available_assets(current_user: dict = Depends(get_current_user)):
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the asset inventory.")
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("SELECT COUNT(*) FROM assets")
