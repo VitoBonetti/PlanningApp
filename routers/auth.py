@@ -1,11 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Response, Request, BackgroundTasks
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-import sqlite3
 import jwt
 from datetime import datetime, timedelta, timezone
 import bcrypt
 from secrets_manager import get_system_config
-from database import DB_FILE
+from database import get_db_connection
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import uuid
@@ -49,9 +48,9 @@ def get_current_user(request: Request):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, name, role, location, session_token FROM users WHERE username = ?", (username,))
+    cursor.execute("SELECT id, username, name, role, location, session_token FROM users WHERE username = %s", (username,))
     user = cursor.fetchone()
     conn.close()
 
@@ -78,9 +77,9 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 @router.post("/token")
 @limiter.limit("5/minute")
 def login_for_access_token(request: Request, response: Response, background_tasks: BackgroundTasks, form_data: OAuth2PasswordRequestForm = Depends()):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, hashed_password, role, name, location FROM users WHERE username = ?", (form_data.username,))
+    cursor.execute("SELECT id, username, hashed_password, role, name, location FROM users WHERE username = %s", (form_data.username,))
     user = cursor.fetchone()
     if not user or not verify_password(form_data.password, user[2]):
         conn.close()
