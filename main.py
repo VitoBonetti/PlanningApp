@@ -1,8 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, users, assets, tests, board
+from fastapi.responses import JSONResponse
+from routers import auth, users, assets, tests, board, setup
 from websockets_manager import manager
 from routers.auth import get_current_user
+from secrets_manager import get_system_config
 import jwt
 from routers.auth import SECRET_KEY, ALGORITHM, limiter
 from slowapi.errors import RateLimitExceeded
@@ -31,10 +33,27 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+@app.middleware("http")
+async def setup_mode_interceptor(request: Request, call_next):
+    # Allow traffic to the setup API, docs, and frontend
+    if request.url.path.startswith("/api/system/") or not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    # If they are trying to access standard APIs, check if the system is configured
+    config = get_system_config()
+    if not config:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "SYSTEM_SETUP_REQUIRED", "message": "The system is currently in Day 0 Setup Mode."}
+        )
+
+    return await call_next(request)
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Wire up all the separated routes!
+app.include_router(setup.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(assets.router)

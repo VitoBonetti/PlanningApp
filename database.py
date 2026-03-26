@@ -1,7 +1,26 @@
 import uuid
 import sqlite3
+import psycopg2
+import os
+from secrets_manager import get_system_config
 
 DB_FILE = '/app/data/planner_v2.db'
+
+
+def get_db_connection():
+    config = get_system_config()
+
+    # If config is missing, we are in Day 0 Setup Mode. No database exists yet!
+    if not config:
+        return None
+
+    return psycopg2.connect(
+        host=config.get("db_host"),
+        port=config.get("db_port"),
+        user=config.get("db_user"),
+        password=config.get("db_pass"),
+        dbname=config.get("db_name")
+    )
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)

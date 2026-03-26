@@ -4,8 +4,7 @@ import sqlite3
 import jwt
 from datetime import datetime, timedelta, timezone
 import bcrypt
-import os
-from google.cloud import secretmanager
+from secrets_manager import get_system_config
 from database import DB_FILE
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -17,26 +16,10 @@ limiter = Limiter(key_func=get_remote_address)
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120
-PROJECT_ID = "planningapp-491007"
 
 
-def get_secret(secret_id, project_id):
-    # Fallback ONLY for local development
-    if os.environ.get("ENV") == "local":
-        return "local-dev-secret-key"
-
-    try:
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
-        response = client.access_secret_version(request={"name": name})
-        return response.payload.data.decode("UTF-8")
-    except Exception as e:
-        print(f"CRITICAL: Failed to fetch secret: {e}")
-        # FAIL SECURE: Crash the app instead of using an insecure key in production!
-        raise RuntimeError(f"Cannot start application without {secret_id}. Check GCP permissions.")
-
-
-SECRET_KEY = get_secret("JWT_SECRET_KEY", PROJECT_ID)
+config = get_system_config()
+SECRET_KEY = config.get("jwt_secret") if config else "temporary-setup-mode-key"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
@@ -48,7 +31,8 @@ def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 
 def get_current_user(request: Request):
