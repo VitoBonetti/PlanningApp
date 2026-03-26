@@ -4,6 +4,7 @@ import psycopg2
 import os
 from secrets_manager import get_system_config
 
+
 DB_FILE = '/app/data/planner_v2.db'
 
 
@@ -23,7 +24,7 @@ def get_db_connection():
     )
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Core Tables
