@@ -105,11 +105,11 @@ def init_db():
         name TEXT,
         market TEXT,
         gost_service TEXT,
-        is_assigned BOOLEAN DEFAULT 0,
+        is_assigned BOOLEAN DEFAULT FALSE,
         business_critical TEXT,
         kpi TEXT,
         whitebox_category TEXT
-        is_assigned BOOLEAN DEFAULT 0,
+        is_assigned BOOLEAN DEFAULT FALSE,
         UNIQUE ( inventory_id, ext_id, number )
         )
     ''')
