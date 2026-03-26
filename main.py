@@ -22,7 +22,7 @@ def startup_event():
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",          # Local React dev server
-    "https://mffdawybwrgvpgxdrcjc.vitobonetti.nl"  # Dev frontend
+    "https://erp.vitobonetti.nl"  # Dev frontend
 ]
 
 app.add_middleware(
