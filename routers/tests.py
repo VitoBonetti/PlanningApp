@@ -107,7 +107,7 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = "Planned" WHERE id = %s', (schedule.start_week, schedule.start_year, test_id))
+    cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s', (schedule.start_week, schedule.start_year, "Planned", test_id))
     conn.commit()
     conn.close()
 
