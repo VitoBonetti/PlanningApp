@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List
-import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from database import get_db_connection
@@ -49,7 +48,7 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: 
 
 # --- BACKGROUND WORKER: Bulk Test Generator ---
 def process_bulk_tests_background(asset_ids: List[str]):
-    conn = sqlite3.connect(DB_FILE, timeout=10)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT id, name FROM services')
     services = cursor.fetchall()
@@ -239,7 +238,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user:
 @router.post("/tests/{test_id}/duplicate")
 def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
-    conn = sqlite3.connect(DB_FILE, timeout=10)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     # 1. Fetch the original test
