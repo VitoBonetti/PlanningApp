@@ -93,3 +93,36 @@ def log_audit_event(user_id: str, username: str, action: str, resource_type: str
             print(f"BigQuery Insert Errors: {errors}")
     except Exception as e:
         print(f"Failed to log to BigQuery: {e}")
+
+
+def fetch_recent_audit_logs(limit: int = 100):
+    """Fetches the most recent audit logs from BigQuery."""
+    client = get_bq_client()
+
+    # If we are running locally without GCP credentials, return a dummy log
+    if not client:
+        return [{
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "username": "SYSTEM",
+            "action": "LOCAL_DEV_MODE",
+            "resource": "BigQuery",
+            "details": "Running locally. Real logs are only fetched in Production."
+        }]
+
+    query = f"""
+        SELECT timestamp, username, action, resource_type as resource, details
+        FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
+        ORDER BY timestamp DESC
+        LIMIT {limit}
+    """
+
+    try:
+        query_job = client.query(query)
+        results = query_job.result()
+        # Convert BigQuery Row objects to standard Python dictionaries
+        return [dict(row) for row in results]
+    except Exception as e:
+        print(f"Failed to fetch logs from BigQuery: {e}")
+        return []
+
+
