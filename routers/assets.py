@@ -116,7 +116,7 @@ def get_available_assets(current_user: dict = Depends(get_current_user)):
 
     cursor.execute("SELECT COUNT(*) FROM assets")
     total = cursor.fetchone()[0] or 0
-    cursor.execute("SELECT COUNT(*) FROM assets WHERE is_assigned = 1")
+    cursor.execute("SELECT COUNT(*) FROM assets WHERE is_assigned")
     assigned = cursor.fetchone()[0] or 0
 
     # Fetch the new columns from the DB

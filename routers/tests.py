@@ -30,7 +30,7 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: 
             # Add to junction table
             c.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, asset_id))
             # Mark the asset as assigned so it vanishes from the available pool
-            c.execute('UPDATE assets SET is_assigned = 1 WHERE id = %s', (asset_id,))
+            c.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
 
     conn.commit()
     conn.close()
@@ -81,7 +81,7 @@ def process_bulk_tests_background(asset_ids: List[str]):
             (new_test_id, asset_name, matched_service_id, 'test', 2.0, 1.0, 'Not Planned', whitebox_cat)
         )
         cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
-        cursor.execute('UPDATE assets SET is_assigned = 1 WHERE id = %s', (asset_id,))
+        cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
 
     conn.commit()
     conn.close()
@@ -161,7 +161,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: d
     linked_assets = cursor.fetchall()
 
     for (asset_id,) in linked_assets:
-        cursor.execute('UPDATE assets SET is_assigned = 0 WHERE id = %s', (asset_id,))
+        cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (asset_id,))
 
     # 2. NEW: Delete the links from the junction table
     cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (test_id,))
