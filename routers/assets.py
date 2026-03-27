@@ -46,17 +46,17 @@ def process_excel_background(contents: bytes):
             kpi = get_val(['KPI']) or ''
             whitebox_category = get_val(['WhiteBox Category']) or ''
 
-            cursor.execute("SELECT id FROM assets WHERE inventory_id=? AND ext_id=? AND number=?",
+            cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
                            (inv_id, ext_id, number))
             if cursor.fetchone():
                 # UPDATE existing record with fresh Excel data
                 cursor.execute(
-                    "UPDATE assets SET name=?, market=?, gost_service=?, business_critical=?, kpi=?, whitebox_category=? WHERE inventory_id=? AND ext_id=? AND number=?",
+                    "UPDATE assets SET name=%s, market=%s, gost_service=%s, business_critical=%s, kpi=%s, whitebox_category=%s WHERE inventory_id=%s AND ext_id=%s AND number=%s",
                     (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
             else:
                 # INSERT new record
                 cursor.execute(
-                    "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                    "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s)",
                     (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi,
                      whitebox_category))
 

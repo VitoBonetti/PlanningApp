@@ -35,7 +35,7 @@ def setup_first_admin(admin: FirstAdminSetup):
     new_id = str(uuid.uuid4())
 
     cursor.execute(
-        'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
         (new_id, admin.username, hashed_pw, admin.name, 'admin', admin.location, 1.0, 1))
     conn.commit()
     conn.close()
@@ -55,7 +55,7 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_
         cursor = conn.cursor()
         # NEW: Added start_week
         cursor.execute(
-            'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
             (new_id, u.username, hashed_pw, u.name, u.role, u.location, u.base_capacity, u.start_week))
         conn.commit()
         conn.close()
@@ -79,9 +79,9 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_
 def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM assignments WHERE user_id = ?', (user_id,))
-    cursor.execute('DELETE FROM events WHERE user_id = ?', (user_id,))
-    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    cursor.execute('DELETE FROM assignments WHERE user_id = %s', (user_id,))
+    cursor.execute('DELETE FROM events WHERE user_id = %s', (user_id,))
+    cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
     conn.commit()
     conn.close()
     background_tasks.add_task(
@@ -104,7 +104,7 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, 
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'UPDATE users SET name=?, role=?, location=?, base_capacity=?, start_week=?, session_token=NULL WHERE id=?',
+        'UPDATE users SET name=%s, role=%s, location=%s, base_capacity=%s, start_week=%s, session_token=NULL WHERE id=%s',
         (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
     conn.commit()
     conn.close()
@@ -127,7 +127,7 @@ def admin_reset_password(user_id: str, p: AdminPasswordReset, background_tasks: 
     hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE users SET hashed_password=? WHERE id=?', (hashed_pw, user_id))
+    cursor.execute('UPDATE users SET hashed_password=%s WHERE id=%s', (hashed_pw, user_id))
     conn.commit()
     conn.close()
     background_tasks.add_task(
@@ -152,7 +152,7 @@ def change_own_password(
     cursor = conn.cursor()
 
     # 1. Fetch the CURRENT password hash from the database to verify it
-    cursor.execute("SELECT hashed_password FROM users WHERE id = ?", (current_user['id'],))
+    cursor.execute("SELECT hashed_password FROM users WHERE id = %s", (current_user['id'],))
     row = cursor.fetchone()
 
     # If the user doesn't exist or the old password doesn't match, reject them!
@@ -166,7 +166,7 @@ def change_own_password(
 
     # 3. UPDATE the password and WIPE the session_token to log out other devices
     cursor.execute(
-        'UPDATE users SET hashed_password=?, session_token=NULL WHERE id=?',
+        'UPDATE users SET hashed_password=%s, session_token=NULL WHERE id=%s',
         (new_hashed_pw, current_user['id'])
     )
     conn.commit()
@@ -190,7 +190,7 @@ def change_own_password(
 def get_my_notifications(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, message, type, created_at FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC", (current_user['id'],))
+    cursor.execute("SELECT id, message, type, created_at FROM notifications WHERE user_id = %s AND is_read = 0 ORDER BY created_at DESC", (current_user['id'],))
     notifs = [{"id": r[0], "message": r[1], "type": r[2], "created_at": r[3]} for r in cursor.fetchall()]
     conn.close()
     return notifs
@@ -199,7 +199,7 @@ def get_my_notifications(current_user: dict = Depends(get_current_user)):
 def mark_notifications_read(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE notifications SET is_read = 1 WHERE user_id = ?", (current_user['id'],))
+    cursor.execute("UPDATE notifications SET is_read = 1 WHERE user_id = %s", (current_user['id'],))
     conn.commit()
     conn.close()
     return {"message": "Notifications marked as read."}
