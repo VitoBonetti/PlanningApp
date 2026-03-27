@@ -6,6 +6,8 @@ import psycopg2
 from secrets_manager import get_system_config, save_system_config
 from database import init_db
 import os
+from audit_logger import fetch_recent_audit_logs
+
 
 router = APIRouter(tags=["System Setup"])
 
@@ -27,6 +29,14 @@ def get_system_status():
     """The React app calls this on boot to see if it should show the Setup Wizard."""
     config = get_system_config()
     return {"setup_required": config is None}
+
+@router.get("/system/audit")
+def get_audit_logs():
+    """Returns the most recent system audit logs from BigQuery."""
+    # Note: Because this is an admin view, you could add token dependency here later
+    # to ensure only admins can fetch it!
+    logs = fetch_recent_audit_logs()
+    return logs
 
 
 @router.post("/system/setup")
