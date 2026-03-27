@@ -132,8 +132,8 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-    cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = "Not Planned" WHERE id = %s',
-                   (test_id,))
+    cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
+                   ("Not Planned", test_id,))
     conn.commit()
     conn.close()
     background_tasks.add_task(
