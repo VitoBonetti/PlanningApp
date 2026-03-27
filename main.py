@@ -77,7 +77,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT session_token FROM users WHERE username = ?", (username,))
+        cursor.execute("SELECT session_token FROM users WHERE username = %s", (username,))
         row = cursor.fetchone()
         conn.close()
 

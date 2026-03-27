@@ -64,7 +64,7 @@ def calculate_weekly_capacity(user_id, year, week_number):
     provision = get_user_provision_internal(cursor, user_id, year, week_number)
 
     # Check if they are already assigned to a test this week
-    cursor.execute('SELECT 1 FROM assignments WHERE user_id = ? AND year = ? AND week_number = ?',
+    cursor.execute('SELECT 1 FROM assignments WHERE user_id = %s AND year = %s AND week_number = %s',
                    (user_id, year, week_number))
     is_assigned = cursor.fetchone() is not None
     conn.close()
