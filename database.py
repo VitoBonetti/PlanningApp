@@ -55,7 +55,7 @@ def init_db():
                      1
                  )''')
 
-    # PostgreSQL native way to add columns safely without try/except blocks!
+   
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_token TEXT DEFAULT ''")
 
     c.execute('''CREATE TABLE IF NOT EXISTS services
@@ -134,7 +134,7 @@ def init_db():
                      REAL
                  )''')
 
-    # Asset Tables (Fixed missing comma and duplicate is_assigned!)
+   
     c.execute('''CREATE TABLE IF NOT EXISTS assets
     (
         id
@@ -199,7 +199,6 @@ def init_db():
                  )
         )''')
 
-    # Fixed DEFAULT 0 to DEFAULT FALSE
     c.execute('''CREATE TABLE IF NOT EXISTS notifications
                  (
                      id
@@ -222,7 +221,6 @@ def init_db():
                      FALSE
                  )''')
 
-    # Seed Default Service Lanes (Fixed SQLite ? to Postgres %s)
     c.execute("SELECT COUNT(*) FROM services")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO services (id, name, max_concurrent_per_week) VALUES (%s, %s, %s)", [
