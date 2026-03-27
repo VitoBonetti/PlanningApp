@@ -103,9 +103,12 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, 
         u.base_capacity = 0.0
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # FIX: Removed session_token=NULL from this query so it doesn't log the admin out!
     cursor.execute(
-        'UPDATE users SET name=%s, role=%s, location=%s, base_capacity=%s, start_week=%s, session_token=NULL WHERE id=%s',
+        'UPDATE users SET name=%s, role=%s, location=%s, base_capacity=%s, start_week=%s WHERE id=%s',
         (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
+        
     conn.commit()
     conn.close()
     background_tasks.add_task(
