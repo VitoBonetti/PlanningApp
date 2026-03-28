@@ -137,7 +137,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008, reason="Invalid authentication token")
         return
 
-    await manager.connect(websocket)
+    await manager.connect(websocket, username)
     try:
         while True:
             data = await websocket.receive_text()

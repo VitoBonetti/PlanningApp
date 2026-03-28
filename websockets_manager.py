@@ -1,22 +1,28 @@
 from fastapi import WebSocket
 from typing import List
+from typing import Dict
+
 
 class ConnectionManager:
     def __init__(self):
-        # list that holds the active connection for every user looking at the app
-        self.active_connections: List[WebSocket] = []
+        # dictionary mapping the WebSocket object to the username
+        self.active_connections: Dict[WebSocket, str] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, username: str):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.active_connections[websocket] = username
+        # broadcast that the user joined
+        await self.broadcast(f'{{"action": "USER_JOINED", "username": "{username}"}}')
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+            username = self.active_connections.pop(websocket)
+            # Broadcast that the user left!
+            await self.broadcast(f'{{"action": "USER_LEFT", "username": "{username}"}}')
 
     async def broadcast(self, message: str):
-        # if a change happens, send a message to all connected browser
-        for connection in self.active_connections:
+        # if a change happens, send a message to all connected browsers
+        for connection in self.active_connections.keys():
             try:
                 await connection.send_text(message)
             except:
