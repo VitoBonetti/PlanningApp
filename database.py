@@ -59,6 +59,10 @@ def init_db():
    
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_token TEXT DEFAULT ''")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT DEFAULT NULL")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_totp_enabled BOOLEAN DEFAULT FALSE")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP")
 
     c.execute('''CREATE TABLE IF NOT EXISTS services
                  (

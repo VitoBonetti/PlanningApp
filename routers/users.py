@@ -4,9 +4,11 @@ import uuid
 import bcrypt
 from database import get_db_connection
 from routers.auth import get_current_user, verify_password, require_admin, limiter
-from models import UserCreateSecure, UserUpdate, PasswordChange, AdminPasswordReset, FirstAdminSetup
+from models import UserCreateSecure, UserUpdate, PasswordChange, AdminPasswordReset, FirstAdminSetup, UserSetupPassword
 from websockets_manager import manager
 from audit_logger import log_audit_event
+import pyotp
+from datetime import datetime, timedelta
 
 router = APIRouter(tags=["Users"])
 
@@ -44,21 +46,26 @@ def setup_first_admin(admin: FirstAdminSetup):
 
 @router.post("/users/")
 @limiter.limit("10/minute")
-def create_user(u: UserCreateSecure, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+def create_user(u: UserCreateSecure, request: Request, background_tasks: BackgroundTasks,
+                current_user: dict = Depends(require_admin)):
     if u.role == 'read_only':
         u.base_capacity = 0.0
-    salt = bcrypt.gensalt()
-    hashed_pw = bcrypt.hashpw(u.password.encode('utf-8'), salt).decode('utf-8')
+
     new_id = str(uuid.uuid4())
+    reset_token = str(uuid.uuid4())
+    expires = datetime.now() + timedelta(hours=24)
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # NEW: Added start_week
         cursor.execute(
-            'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-            (new_id, u.username, hashed_pw, u.name, u.role, u.location, u.base_capacity, u.start_week))
+            '''INSERT INTO users (id, username, name, role, location, base_capacity, start_week, reset_token,
+                                  reset_token_expires, is_totp_enabled)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)''',
+            (new_id, u.username, u.name, u.role, u.location, u.base_capacity, u.start_week, reset_token, expires)
+        )
         conn.commit()
-        conn.close()
+        setup_link = f"{request.base_url}setup-account?token={reset_token}"
         background_tasks.add_task(
             log_audit_event,
             user_id=current_user["id"],
@@ -69,14 +76,16 @@ def create_user(u: UserCreateSecure, request: Request, background_tasks: Backgro
             details=f"Created {u.role} account for {u.name}"
         )
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-        return {"message": f"User {u.name} created."}
+        return {
+            "message": f"User {u.name} created.",
+            "secure_link": setup_link,
+            "instructions": "Copy this link and share it securely with the user. It expires in 24 hours."
+        }
     except psycopg2.errors.UniqueViolation:
-        if conn:
-            conn.rollback()  # Always rollback on error
+        if conn: conn.rollback()  # Always rollback on error
         raise HTTPException(status_code=400, detail="Username already exists.")
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 # Delete User Endpoint
@@ -134,13 +143,16 @@ def update_user(user_id: str, u: UserUpdate, request: Request, background_tasks:
 @router.put("/users/{user_id}/reset-password")
 @limiter.limit("5/minute")
 def admin_reset_password(user_id: str, p: AdminPasswordReset, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
-    salt = bcrypt.gensalt()
-    hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
+    reset_token = str(uuid.uuid4())
+    expires = datetime.now() + timedelta(hours=2)  # Shorter expiry for resets
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE users SET hashed_password=%s WHERE id=%s', (hashed_pw, user_id))
+    cursor.execute('UPDATE users SET reset_token=%s, reset_token_expires=%s WHERE id=%s',
+                   (reset_token, expires, user_id))
     conn.commit()
     conn.close()
+    reset_link = f"{request.base_url}setup-account?token={reset_token}"
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -148,9 +160,13 @@ def admin_reset_password(user_id: str, p: AdminPasswordReset, request: Request, 
         action="PSW_RESET",
         resource_type="USER",
         resource_id=user_id,
-        details="Password has been reset."
+        details="REset link has been created."
     )
-    return {"message": "User password reset successfully."}
+    return {
+        "message": "Reset link generated.",
+        "secure_link": reset_link,
+        "instructions": "Share this link with the user. It expires in 2 hours."
+    }
 
 
 @router.put("/users/me/password")
@@ -193,6 +209,60 @@ def change_own_password(p: PasswordChange, request: Request, background_tasks: B
 
     return {"message": "Password changed successfully."}
 
+
+@router.post("/users/setup-password")
+@limiter.limit("5/minute")
+def setup_user_password(payload: UserSetupPassword, request: Request, background_tasks: BackgroundTasks):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Find the user by the valid reset token
+    cursor.execute(
+        "SELECT id, username, totp_secret FROM users WHERE reset_token = %s AND reset_token_expires > %s",
+        (payload.token, datetime.now())
+    )
+    user = cursor.fetchone()
+
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Invalid or expired setup link.")
+
+    user_id, username, totp_secret = user[0], user[1], user[2]
+
+    # 2. Verify the 2FA Code (Google Authenticator)
+    totp = pyotp.TOTP(totp_secret)
+    if not totp.verify(payload.totp_code):
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid Authenticator code.")
+
+    # 3. NOW we generate the salt and hash the new password
+    salt = bcrypt.gensalt()
+    hashed_pw = bcrypt.hashpw(payload.new_password.encode('utf-8'), salt).decode('utf-8')
+
+    # 4. Save the secure hash, enable TOTP, and DESTROY the reset token
+    cursor.execute(
+        '''UPDATE users
+           SET hashed_password     = %s,
+               is_totp_enabled     = TRUE,
+               reset_token         = NULL,
+               reset_token_expires = NULL
+           WHERE id = %s''',
+        (hashed_pw, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=user_id,
+        username=username,
+        action="ACCOUNT_SETUP",
+        resource_type="USER",
+        resource_id=user_id,
+        details="User securely set their initial password and enabled 2FA."
+    )
+
+    return {"message": "Account secured. You may now log in."}
 
 @router.get("/users/me/notifications")
 def get_my_notifications(current_user: dict = Depends(get_current_user)):

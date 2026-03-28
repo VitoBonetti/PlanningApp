@@ -27,14 +27,20 @@ class UserRole(str, Enum):
 
 class UserCreateSecure(BaseModel):
     username: str
-    password: str
     name: str
     role: UserRole
     location: str
     base_capacity: float = 1.0
     start_week: int = 1
 
-    @field_validator('password')
+
+# The user payload when they click the secure link
+class UserSetupPassword(BaseModel):
+    token: str
+    new_password: str
+    totp_code: str  # Enforcing 2FA on setup
+
+    @field_validator('new_password')
     @classmethod
     def validate_password(cls, v):
         return enforce_password_policy(v)

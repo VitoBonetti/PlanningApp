@@ -1,8 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 import secrets
 import bcrypt
 import psycopg2
+import pyotp
+import qrcode
+import base64
+from io import BytesIO
 from secrets_manager import get_system_config, save_system_config
 from database import init_db
 import os
@@ -22,6 +26,8 @@ class SetupPayload(BaseModel):
     admin_username: str
     admin_password: str
     admin_name: str
+    totp_secret: str
+    totp_code: str
 
 
 @router.get("/system/status")
@@ -39,11 +45,40 @@ def get_audit_logs():
     return logs
 
 
+@router.get("/system/setup/totp")
+def generate_setup_totp(request: Request):
+    """Generates a provisional TOTP secret and QR code for the Day-0 admin."""
+    if get_system_config() is not None:
+        raise HTTPException(status_code=400, detail="System is already configured.")
+
+    # 1. Generate a secure Base32 secret
+    secret = pyotp.random_base32()
+
+    # 2. Create the provisioning URI for Google Authenticator / Authy
+    totp = pyotp.TOTP(secret)
+    provisioning_uri = totp.provisioning_uri(name="Master Admin", issuer_name="GOST ERP")
+
+    # 3. Generate the QR Code as a base64 image (so the frontend doesn't need extra libraries)
+    qr = qrcode.make(provisioning_uri)
+    buffered = BytesIO()
+    qr.save(buffered, format="PNG")
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    return {
+        "totp_secret": secret,
+        "qr_code": f"data:image/png;base64,{qr_base64}"
+    }
+
+
 @router.post("/system/setup")
 def execute_system_setup(payload: SetupPayload):
     # 1. Prevent running setup twice
     if get_system_config() is not None:
         raise HTTPException(status_code=400, detail="System is already configured.")
+
+    totp = pyotp.TOTP(payload.totp_secret)
+    if not totp.verify(payload.totp_code):
+        raise HTTPException(status_code=401, detail="Invalid Authenticator Code. Please try again.")
 
     # 2. Decide which credentials to use!
     if payload.use_custom_db:
