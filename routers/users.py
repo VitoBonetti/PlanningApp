@@ -291,7 +291,7 @@ def mark_notifications_read(current_user: dict = Depends(get_current_user)):
 
 @router.get("/users/setup-info")
 @limiter.limit("5/minute")
-def get_user_setup_info(token: str):
+def get_user_setup_info(request: Request, token: str):
     """Fetches the username and generates the 2FA QR code for the setup screen."""
     conn = get_db_connection()
     cursor = conn.cursor()
