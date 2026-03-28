@@ -5,7 +5,6 @@ import bcrypt
 import psycopg2
 import pyotp
 import qrcode
-import qrcode.image.svg
 import base64
 from io import BytesIO
 from secrets_manager import get_system_config, save_system_config
