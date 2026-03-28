@@ -66,8 +66,12 @@ def execute_system_setup(payload: SetupPayload):
     # 3. Test the PostgreSQL Database Connection FIRST
     try:
         conn = psycopg2.connect(
-            host=final_db_host, port=final_db_port,
-            user=final_db_user, password=final_db_pass, dbname=final_db_name
+            host=final_db_host,
+            port=final_db_port,
+            user=final_db_user,
+            password=final_db_pass,
+            dbname=final_db_name,
+            sslmode="require"
         )
         conn.close()
     except Exception as e:
@@ -105,7 +109,8 @@ def execute_system_setup(payload: SetupPayload):
         port=master_config["db_port"],
         user=master_config["db_user"],
         password=master_config["db_pass"],
-        dbname=master_config["db_name"]
+        dbname=master_config["db_name"],
+        sslmode="require"
     )
     cursor = conn.cursor()
     cursor.execute(

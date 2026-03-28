@@ -1,10 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request
 import pandas as pd
 import io
-import sqlite3
 import uuid
 from database import get_db_connection
-from routers.auth import get_current_user, require_admin
+from routers.auth import get_current_user, require_admin, limiter
 from audit_logger import log_audit_event
 
 router = APIRouter(tags=["Assets"])
@@ -67,7 +66,8 @@ def process_excel_background(contents: bytes):
 
 
 @router.post("/assets/import")
-async def import_assets(background_tasks: BackgroundTasks, file: UploadFile = File(...),
+@limiter.limit("3/minute")
+async def import_assets(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...),
                         current_user: dict = Depends(require_admin)):
 
     contents = await file.read()

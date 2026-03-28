@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from typing import List
 import uuid
 from datetime import datetime, timedelta
 from database import get_db_connection
-from routers.auth import get_current_user, require_admin
+from routers.auth import get_current_user, require_admin, limiter
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -12,7 +12,7 @@ router = APIRouter(tags=["Tests & Assignments"])
 
 
 @router.post("/tests/")
-def create_test(t: TestCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     new_id = str(uuid.uuid4())
 
@@ -88,7 +88,8 @@ def process_bulk_tests_background(asset_ids: List[str]):
 
 # Triggers Bulk Generation ---
 @router.post("/tests/bulk")
-def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
+@limiter.limit("3/minute")
+def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
 
 
@@ -150,7 +151,8 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
 
 
 @router.delete("/tests/{test_id}")
-def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+@limiter.limit("5/minute")
+def delete_test(test_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -185,7 +187,8 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks, current_user: d
 
 
 @router.put("/tests/{test_id}")
-def update_test(test_id: str, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(require_admin)):
+@limiter.limit("10/minute")
+def update_test(test_id: str, request: Request, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(require_admin)):
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -353,7 +356,8 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 
 
 @router.delete("/assignments/{test_id}/{user_id}")
-def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+@limiter.limit("5/minute")
+def remove_assignment(test_id: str, user_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))

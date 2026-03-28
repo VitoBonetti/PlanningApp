@@ -16,7 +16,8 @@ def get_db_connection():
         port=config.get("db_port"),
         user=config.get("db_user"),
         password=config.get("db_pass"),
-        dbname=config.get("db_name")
+        dbname=config.get("db_name"),
+        sslmode='require'
     )
 
 
@@ -57,6 +58,7 @@ def init_db():
 
    
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_token TEXT DEFAULT ''")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT DEFAULT NULL")
 
     c.execute('''CREATE TABLE IF NOT EXISTS services
                  (

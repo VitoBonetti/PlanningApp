@@ -3,9 +3,14 @@ import json
 from google.cloud import secretmanager
 from google.api_core.exceptions import NotFound
 
-# We grab the Project ID from the environment, defaulting to your known project
-PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "planningapp-491007")
-SECRET_ID = "erp_system_config"
+
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+if not PROJECT_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("GCP_PROJECT_ID environment variable is not set.")
+
+SECRET_ID = os.environ.get("SECRET_ID")
+if not SECRET_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("SECRET_ID environment variable is not set.")
 
 def get_system_config():
     """
@@ -26,7 +31,7 @@ def get_system_config():
         secret_string = response.payload.data.decode("UTF-8")
         return json.loads(secret_string)
     except NotFound:
-        print("🚨 Day 0 State Detected: erp_system_config secret not found in GCP.")
+        print(f"🚨 Day 0 State Detected: {SECRET_ID} secret not found in GCP.")
         return None
     except Exception as e:
         print(f"Error accessing Secret Manager: {e}")

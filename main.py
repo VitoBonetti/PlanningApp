@@ -64,6 +64,12 @@ app.include_router(board.router)
 @app.websocket("/ws/board")
 @app.websocket("/api/ws/board")
 async def websocket_endpoint(websocket: WebSocket):
+    # CSRF Protection
+    origin = websocket.headers.get("origin")
+    if origin not in ALLOWED_ORIGINS:
+        await websocket.close(code=1008, reason="Cross-Site Request Blocked")
+        return
+
     token = websocket.cookies.get("access_token")
 
     if not token:

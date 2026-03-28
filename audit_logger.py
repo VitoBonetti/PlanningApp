@@ -1,12 +1,44 @@
 from google.cloud import bigquery
 from datetime import datetime, timezone
 import os
+import re
 
-# Define your GCP Project and Dataset
-PROJECT_ID = "planningapp-491007"
-DATASET_ID = "erp_audit_logs"
-TABLE_ID = "system_events"
-LOCATION = "europe-west4"
+
+
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+if not PROJECT_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("GCP_PROJECT_ID environment variable is not set.")
+
+DATASET_ID = os.environ.get("DATASET_ID")
+if not DATASET_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("DATASET_ID environment variable is not set.")
+
+TABLE_ID = os.environ.get("TABLE_ID")
+if not TABLE_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("TABLE_ID environment variable is not set.")
+
+LOCATION = os.environ.get("LOCATION")
+if not LOCATION and os.environ.get("ENV") != "local":
+    raise EnvironmentError("LOCATION environment variable is not set.")
+
+
+def sanitize_details(details: str) -> str:
+    """Removes sensitive patterns like passwords or tokens from log strings."""
+    if not details:
+        return details
+
+    # Patterns to redact: passwords, secrets, and JWT-like strings
+    patterns = [
+        (r'(password["\s:=]+)["\']?([^"\'\s,]+)["\']?', r'\1[REDACTED]'),
+        (r'(secret["\s:=]+)["\']?([^"\'\s,]+)["\']?', r'\1[REDACTED]'),
+        (r'(token["\s:=]+)["\']?([^"\'\s,]+)["\']?', r'\1[REDACTED]'),
+        (r'(eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*)', '[JWT_REDACTED]')
+    ]
+
+    sanitized = details
+    for pattern, replacement in patterns:
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+    return sanitized
 
 
 def get_bq_client():
@@ -84,7 +116,7 @@ def log_audit_event(user_id: str, username: str, action: str, resource_type: str
         "action": str(action),
         "resource_type": str(resource_type),
         "resource_id": str(resource_id) if resource_id else None,
-        "details": str(details) if details else None
+        "details": sanitize_details(details)
     }]
 
     try:

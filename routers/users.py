@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 import sqlite3
 import uuid
 import bcrypt
 from database import get_db_connection
-from routers.auth import get_current_user, verify_password, require_admin
+from routers.auth import get_current_user, verify_password, require_admin, limiter
 from models import UserCreateSecure, UserUpdate, PasswordChange, AdminPasswordReset, FirstAdminSetup
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -43,8 +43,8 @@ def setup_first_admin(admin: FirstAdminSetup):
 
 
 @router.post("/users/")
-def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
-
+@limiter.limit("10/minute")
+def create_user(u: UserCreateSecure, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     if u.role == 'read_only':
         u.base_capacity = 0.0
     salt = bcrypt.gensalt()
@@ -76,7 +76,8 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks, current_
 
 # Delete User Endpoint
 @router.delete("/users/{user_id}")
-def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+@limiter.limit("5/minute")
+def delete_user(user_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments WHERE user_id = %s', (user_id,))
@@ -98,7 +99,8 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: d
 
 
 @router.put("/users/{user_id}")
-def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+@limiter.limit("10/minute")
+def update_user(user_id: str, u: UserUpdate, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     if u.role == 'read_only':
         u.base_capacity = 0.0
     conn = get_db_connection()
@@ -125,7 +127,8 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, 
 
 
 @router.put("/users/{user_id}/reset-password")
-def admin_reset_password(user_id: str, p: AdminPasswordReset, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+@limiter.limit("5/minute")
+def admin_reset_password(user_id: str, p: AdminPasswordReset, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     salt = bcrypt.gensalt()
     hashed_pw = bcrypt.hashpw(p.new_password.encode('utf-8'), salt).decode('utf-8')
     conn = get_db_connection()
@@ -146,11 +149,8 @@ def admin_reset_password(user_id: str, p: AdminPasswordReset, background_tasks: 
 
 
 @router.put("/users/me/password")
-def change_own_password(
-        p: PasswordChange,
-        background_tasks: BackgroundTasks,  # <-- Added for the logger
-        current_user: dict = Depends(get_current_user)
-):
+@limiter.limit("5/minute")
+def change_own_password(p: PasswordChange, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
 

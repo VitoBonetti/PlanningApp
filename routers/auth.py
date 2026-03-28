@@ -9,12 +9,14 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 import uuid
 from audit_logger import log_audit_event
+import secrets
 
 router = APIRouter(tags=["Authentication"])
 limiter = Limiter(key_func=get_remote_address)
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 120
+ACCESS_TOKEN_EXPIRE_MINUTES = 5
+REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 config = get_system_config()
@@ -88,21 +90,29 @@ def login_for_access_token(request: Request, response: Response, background_task
     if not user or not verify_password(form_data.password, user[2]):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
+    # generate Tokens
     new_session = str(uuid.uuid4())
-    cursor.execute("UPDATE users SET session_token = %s WHERE id = %s", (new_session, user[0]))
+    access_token = create_access_token(data={"sub": user[1], "session": new_session})
+
+    # Secure random string for the refresh token
+    refresh_token = secrets.token_urlsafe(32)
+
+    cursor.execute(
+        "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
+        (new_session, refresh_token, user[0])
+    )
     conn.commit()
     conn.close()
 
-    access_token = create_access_token(data={"sub": user[1], "session": new_session})
-
     # Issue HttpOnly Cookie!
     response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite="lax",
+        key="access_token", value=access_token, httponly=True, secure=True, samesite="lax",
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
+    response.set_cookie(
+        key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api/auth/refresh"  # Security: Only send this cookie to the refresh endpoint
     )
 
     background_tasks.add_task(
@@ -117,9 +127,60 @@ def login_for_access_token(request: Request, response: Response, background_task
     return {"id": user[0], "role": user[3], "name": user[4], "location": user[5]}
 
 
+@router.post("/auth/refresh")
+@limiter.limit("5/minute")
+def refresh_access_token(request: Request, response: Response):
+    old_refresh_token = request.cookies.get("refresh_token")
+    if not old_refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token missing")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Find the user by this refresh token
+    cursor.execute("SELECT id, username FROM users WHERE refresh_token = %s", (old_refresh_token,))
+    user = cursor.fetchone()
+
+    if not user:
+        # SECURITY ALERT: If a refresh token is used but not found,
+        # it might have been stolen and already rotated.
+        # For maximum security, you could find the user by their last known session
+        # and wipe ALL their tokens here (Token Reuse Detection).
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    # ROTATION: Generate brand new tokens
+    new_session_id = str(uuid.uuid4())
+    new_access_token = create_access_token(data={"sub": user[1], "session": new_session_id})
+    new_refresh_token = secrets.token_urlsafe(32)
+
+    # Update DB with new pair
+    cursor.execute(
+        "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
+        (new_session_id, new_refresh_token, user[0])
+    )
+    conn.commit()
+    conn.close()
+
+    # Set new cookies
+    response.set_cookie(key="access_token", value=new_access_token, httponly=True, secure=True, samesite="lax")
+    response.set_cookie(key="refresh_token", value=new_refresh_token, httponly=True, secure=True, samesite="lax",
+                        path="/api/auth/refresh")
+
+    return {"status": "refreshed"}
+
+
 @router.post("/logout")
 def logout(response: Response, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+    # Clear the session token in the database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET session_token = NULL WHERE id = %s", (current_user["id"],))
+    conn.commit()
+    conn.close()
+
     response.delete_cookie("access_token")
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],

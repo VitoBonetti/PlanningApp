@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from database import get_db_connection
-from routers.auth import get_current_user, require_admin, require_write_access
+from routers.auth import get_current_user, require_admin, require_write_access, limiter
 from models import EventCreate, EventUpdate
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -150,7 +150,8 @@ def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTask
 
 
 @router.delete("/events/{event_id}")
-def delete_event(event_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_write_access)):
+@limiter.limit("5/minute")
+def delete_event(event_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_write_access)):
     conn = get_db_connection()
     c = conn.cursor()
 
@@ -257,7 +258,8 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
 
 
 @router.delete("/system/wipe")
-def wipe_system(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+@limiter.limit("1/minute")
+def wipe_system(request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
 
     conn = get_db_connection()
     cursor = conn.cursor()
