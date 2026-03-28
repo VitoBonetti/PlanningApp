@@ -10,6 +10,7 @@ from slowapi.util import get_remote_address
 import uuid
 from audit_logger import log_audit_event
 import secrets
+from websockets_manager import manager
 
 router = APIRouter(tags=["Authentication"])
 limiter = Limiter(key_func=get_remote_address)
@@ -178,6 +179,12 @@ def logout(response: Response, background_tasks: BackgroundTasks, current_user: 
     conn.close()
 
     response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")
+
+    background_tasks.add_task(
+        manager.broadcast,
+        f'{{"action": "USER_LEFT", "username": "{current_user["username"]}"}}'
+    )
 
     background_tasks.add_task(
         log_audit_event,
