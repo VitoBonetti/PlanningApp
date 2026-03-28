@@ -5,6 +5,7 @@ import bcrypt
 import psycopg2
 import pyotp
 import qrcode
+import qrcode.image.svg
 import base64
 from io import BytesIO
 from secrets_manager import get_system_config, save_system_config
@@ -59,14 +60,15 @@ def generate_setup_totp(request: Request):
     provisioning_uri = totp.provisioning_uri(name="Master Admin", issuer_name="GOST ERP")
 
     # 3. Generate the QR Code as a base64 image (so the frontend doesn't need extra libraries)
-    qr = qrcode.make(provisioning_uri)
+    factory = qrcode.image.svg.SvgImage
+    qr = qrcode.make(provisioning_uri, image_factory=factory)
     buffered = BytesIO()
-    qr.save(buffered, format="PNG")
+    qr.save(buffered)
     qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     return {
         "totp_secret": secret,
-        "qr_code": f"data:image/png;base64,{qr_base64}"
+        "qr_code": f"data:image/svg+xml;base64,{qr_base64}"
     }
 
 
