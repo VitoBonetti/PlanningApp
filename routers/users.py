@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
-import sqlite3
+import psycopg2
 import uuid
 import bcrypt
 from database import get_db_connection
@@ -70,8 +70,13 @@ def create_user(u: UserCreateSecure, request: Request, background_tasks: Backgro
         )
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
         return {"message": f"User {u.name} created."}
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
+        if conn:
+            conn.rollback()  # Always rollback on error
         raise HTTPException(status_code=400, detail="Username already exists.")
+    finally:
+        if conn:
+            conn.close()
 
 
 # Delete User Endpoint

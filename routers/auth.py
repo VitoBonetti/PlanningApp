@@ -20,7 +20,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 config = get_system_config()
-SECRET_KEY = config.get("jwt_secret") if config else "temporary-setup-mode-key"
+SECRET_KEY = config.get("jwt_secret") if config else secrets.token_urlsafe(32)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
@@ -83,11 +83,9 @@ def login_for_access_token(request: Request, response: Response, background_task
     cursor = conn.cursor()
     cursor.execute("SELECT id, username, hashed_password, role, name, location FROM users WHERE username = %s", (form_data.username,))
     user = cursor.fetchone()
-    if not user or not verify_password(form_data.password, user[2]):
-        conn.close()
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     if not user or not verify_password(form_data.password, user[2]):
+        conn.close()
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     # generate Tokens

@@ -1,13 +1,19 @@
 from pydantic import BaseModel
 from typing import Optional, List
+from enum import Enum
 
+
+class UserRole(str, Enum):
+    admin = "admin"
+    pentester = "pentester"
+    read_only = "read_only"
 
 
 class UserCreateSecure(BaseModel):
     username: str
     password: str
     name: str
-    role: str
+    role: UserRole
     location: str
     base_capacity: float = 1.0
     start_week: int = 1
@@ -22,7 +28,7 @@ class FirstAdminSetup(BaseModel):
 
 class UserUpdate(BaseModel):
     name: str
-    role: str
+    role: UserRole
     location: str
     base_capacity: float
     start_week: int

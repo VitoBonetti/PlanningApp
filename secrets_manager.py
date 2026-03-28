@@ -12,6 +12,8 @@ SECRET_ID = os.environ.get("SECRET_ID")
 if not SECRET_ID and os.environ.get("ENV") != "local":
     raise EnvironmentError("SECRET_ID environment variable is not set.")
 
+LOCAL_MOCK_FILE = ".mock_secrets.json"
+
 def get_system_config():
     """
     Attempts to fetch the system configuration from GCP Secret Manager.
@@ -20,6 +22,10 @@ def get_system_config():
     """
     if os.environ.get("ENV") == "local":
         print("[LOCAL MODE] Bypassing GCP Secret Manager.")
+        # Try to read the local mock file if it exists
+        if os.path.exists(LOCAL_MOCK_FILE):
+            with open(LOCAL_MOCK_FILE, "r") as f:
+                return json.load(f)
         # Return None here if you want to test the Day 0 Wizard locally!
         return None
 
@@ -43,8 +49,10 @@ def save_system_config(payload: dict):
     Creates the secret container if it doesn't exist, then adds the version.
     """
     if os.environ.get("ENV") == "local":
-        print("[LOCAL MODE] Simulating saving to Secret Manager:")
-        print(json.dumps(payload, indent=2))
+        print("[LOCAL MODE] Saving to local mock file.")
+        # Save the config locally so we don't have to setup again
+        with open(LOCAL_MOCK_FILE, "w") as f:
+            json.dump(payload, f, indent=2)
         return True
 
     client = secretmanager.SecretManagerServiceClient()
