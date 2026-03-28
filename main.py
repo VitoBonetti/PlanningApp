@@ -57,6 +57,9 @@ app.add_middleware(
 async def setup_mode_interceptor(request: Request, call_next):
     global SYSTEM_IS_SETUP
 
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     # Allow traffic to docs and frontend
     if not request.url.path.startswith("/api/"):
         return await call_next(request)
