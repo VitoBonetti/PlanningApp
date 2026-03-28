@@ -26,6 +26,10 @@ services:
       - SETUP_DB_USER=${POSTGRES_USER}
       - SETUP_DB_PASS=${POSTGRES_PASSWORD}
       - SETUP_DB_NAME=${POSTGRES_DB}
+      - DATASET_ID=${DATASET_ID}
+      - TABLE_ID=${TABLE_ID}
+      - LOCATION=${LOCATION}
+      - SECRET_ID=${SECRET_ID}
     depends_on:
       - db
     volumes:
