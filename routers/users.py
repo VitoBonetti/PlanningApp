@@ -9,6 +9,10 @@ from websockets_manager import manager
 from audit_logger import log_audit_event
 import pyotp
 from datetime import datetime, timedelta
+import qrcode
+import qrcode.image.svg
+import base64
+from io import BytesIO
 
 router = APIRouter(tags=["Users"])
 
@@ -54,15 +58,17 @@ def create_user(u: UserCreateSecure, request: Request, background_tasks: Backgro
     new_id = str(uuid.uuid4())
     reset_token = str(uuid.uuid4())
     expires = datetime.now() + timedelta(hours=24)
+    totp_secret = pyotp.random_base32()
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
             '''INSERT INTO users (id, username, name, role, location, base_capacity, start_week, reset_token,
-                                  reset_token_expires, is_totp_enabled)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)''',
-            (new_id, u.username, u.name, u.role, u.location, u.base_capacity, u.start_week, reset_token, expires)
+                                  reset_token_expires, is_totp_enabled, totp_secret)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s)''',
+            (new_id, u.username, u.name, u.role, u.location, u.base_capacity, u.start_week, reset_token, expires,
+             totp_secret)
         )
         conn.commit()
         setup_link = f"{request.base_url}setup-account?token={reset_token}"
@@ -281,4 +287,37 @@ def mark_notifications_read(current_user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
     return {"message": "Notifications marked as read."}
+
+
+@router.get("/users/setup-info")
+@limiter.limit("5/minute")
+def get_user_setup_info(token: str):
+    """Fetches the username and generates the 2FA QR code for the setup screen."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT username, totp_secret FROM users WHERE reset_token = %s AND reset_token_expires > %s",
+        (token, datetime.now())
+    )
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired setup link.")
+
+    username, secret = user[0], user[1]
+
+    # Generate SVG QR Code
+    totp = pyotp.TOTP(secret)
+    uri = totp.provisioning_uri(name=username, issuer_name="GOST ERP")
+    factory = qrcode.image.svg.SvgImage
+    qr = qrcode.make(uri, image_factory=factory)
+    buffered = BytesIO()
+    qr.save(buffered)
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    return {
+        "username": username,
+        "qr_code": f"data:image/svg+xml;base64,{qr_base64}"
+    }
 
