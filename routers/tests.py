@@ -132,6 +132,23 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # fetch assigned users and test name BEFORE deleting
+    cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
+    assigned_users = cursor.fetchall()
+
+    cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
+    test_row = cursor.fetchone()
+
+    if test_row:
+        # Insert removal notifications for everyone assigned
+        for (user_id,) in assigned_users:
+            notif_id = str(uuid.uuid4())
+            cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+                           (notif_id, user_id, f"You were removed from {test_row[0]} because it was unscheduled.",
+                            "REMOVAL"))
+
+    # deletion
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
                    ("Not Planned", test_id,))
