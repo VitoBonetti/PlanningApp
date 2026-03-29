@@ -39,10 +39,21 @@ def startup_event():
     init_db()
     init_audit_log_infrastructure()
 
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",          # Local React dev server
-    "https://erp.vitobonetti.nl"  # Dev frontend
-]
+env_origins = os.environ.get("ALLOWED_ORIGINS", "")
+
+if env_origins:
+    # PRODUCTION: Reads from docker-compose.yml
+    ALLOWED_ORIGINS = [origin.strip() for origin in env_origins.split(",")]
+elif os.environ.get("ENV") == "local":
+    # LOCAL DEV ONLY: For when you are coding on your actual laptop
+    ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ]
+else:
+    # Fail safe
+    ALLOWED_ORIGINS = []
+
 
 app.add_middleware(
     CORSMiddleware,

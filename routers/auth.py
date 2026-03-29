@@ -4,7 +4,7 @@ import jwt
 from datetime import datetime, timedelta, timezone
 import bcrypt
 from secrets_manager import get_system_config
-from database import get_db_connection, get_db_cursor
+from database import get_db_cursor
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import uuid
@@ -88,24 +88,25 @@ def login_for_access_token(request: Request, response: Response, background_task
     new_session = str(uuid.uuid4())
     access_token = create_access_token(data={"sub": user[1], "session": new_session})
 
-    # Secure random string for the refresh token
-    refresh_token = secrets.token_urlsafe(32)
+    # Generate the raw token and hash it
+    raw_refresh_secret = secrets.token_urlsafe(32)
+    salt = bcrypt.gensalt()
+    hashed_refresh = bcrypt.hashpw(raw_refresh_secret.encode('utf-8'), salt).decode('utf-8')
+
+    refresh_cookie_value = f"{user[0]}:{raw_refresh_secret}"
 
     cursor.execute(
         "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
-        (new_session, refresh_token, user[0])
+        (new_session, hashed_refresh, user[0])
     )
 
-    # Issue HttpOnly Cookie!
-    response.set_cookie(
-        key="access_token", value=access_token, httponly=True, secure=True, samesite="lax",
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-    response.set_cookie(
-        key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="lax",
-        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-        path="/api/auth/refresh"  # Security: Only send this cookie to the refresh endpoint
-    )
+    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="lax",
+                        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+    response.set_cookie(key="refresh_token", value=refresh_cookie_value, httponly=True, secure=True, samesite="lax",
+                        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60, path="/api/auth/refresh")
+
+    background_tasks.add_task(log_audit_event, user_id=user[0], username=user[1], action="LOGIN",
+                              resource_type="SESSION", details="User successfully authenticated.")
 
     background_tasks.add_task(
         log_audit_event,
@@ -122,35 +123,41 @@ def login_for_access_token(request: Request, response: Response, background_task
 @router.post("/auth/refresh")
 @limiter.limit("5/minute")
 def refresh_access_token(request: Request, response: Response, cursor = Depends(get_db_cursor)):
-    old_refresh_token = request.cookies.get("refresh_token")
-    if not old_refresh_token:
-        raise HTTPException(status_code=401, detail="Refresh token missing")
+    old_refresh_cookie = request.cookies.get("refresh_token")
+    if not old_refresh_cookie or ":" not in old_refresh_cookie:
+        raise HTTPException(status_code=401, detail="Invalid refresh token format")
 
     # Find the user by this refresh token
-    cursor.execute("SELECT id, username FROM users WHERE refresh_token = %s", (old_refresh_token,))
+    try:
+        user_id, raw_refresh_secret = old_refresh_cookie.split(":", 1)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Malformed refresh token")
+
+    cursor.execute("SELECT id, username, refresh_token FROM users WHERE id = %s", (user_id,))
     user = cursor.fetchone()
 
-    if not user:
-        # SECURITY ALERT: If a refresh token is used but not found,
-        # it might have been stolen and already rotated.
-        # For maximum security, you could find the user by their last known session
-        # and wipe ALL their tokens here (Token Reuse Detection).
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if not user or not user[2] or not bcrypt.checkpw(raw_refresh_secret.encode('utf-8'), user[2].encode('utf-8')):
+        # SECURITY ALERT: If it fails, they are using a bad/old token.
+        # Force a total logout for safety.
+        if user:
+            cursor.execute("UPDATE users SET session_token = NULL, refresh_token = NULL WHERE id = %s", (user[0],))
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
     # ROTATION: Generate brand new tokens
     new_session_id = str(uuid.uuid4())
     new_access_token = create_access_token(data={"sub": user[1], "session": new_session_id})
-    new_refresh_token = secrets.token_urlsafe(32)
 
-    # Update DB with new pair
+    new_raw_secret = secrets.token_urlsafe(32)
+    new_hashed_refresh = bcrypt.hashpw(new_raw_secret.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    new_refresh_cookie_value = f"{user[0]}:{new_raw_secret}"
+
     cursor.execute(
         "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
-        (new_session_id, new_refresh_token, user[0])
+        (new_session_id, new_hashed_refresh, user[0])
     )
 
-    # Set new cookies
     response.set_cookie(key="access_token", value=new_access_token, httponly=True, secure=True, samesite="lax")
-    response.set_cookie(key="refresh_token", value=new_refresh_token, httponly=True, secure=True, samesite="lax",
+    response.set_cookie(key="refresh_token", value=new_refresh_cookie_value, httponly=True, secure=True, samesite="lax",
                         path="/api/auth/refresh")
 
     return {"status": "refreshed"}

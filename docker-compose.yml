@@ -32,6 +32,7 @@ services:
       - TABLE_ID=${TABLE_ID}
       - LOCATION=${LOCATION}
       - SECRET_ID=${SECRET_ID}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
     depends_on:
       - db
     volumes:
