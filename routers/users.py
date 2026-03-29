@@ -26,7 +26,7 @@ def check_system_status(cursor = Depends(get_db_cursor)):
 
 @router.post("/system/setup")
 @limiter.limit("3/minute")
-def setup_first_admin(admin: FirstAdminSetup, cursor = Depends(get_db_cursor)):
+def setup_first_admin(admin: FirstAdminSetup, request: Request, cursor = Depends(get_db_cursor)):
     cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
     if cursor.fetchone()[0] > 0:
         raise HTTPException(status_code=400, detail="System is already setup.")
