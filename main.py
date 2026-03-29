@@ -10,7 +10,7 @@ from routers.auth import SECRET_KEY, ALGORITHM, limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 import secrets
-from database import get_db_connection, init_db
+from database import get_db_connection, init_db, db_cursor_context
 from audit_logger import init_audit_log_infrastructure
 import os
 
@@ -122,11 +122,12 @@ async def websocket_endpoint(websocket: WebSocket):
         username = payload.get("sub")
         session_token = payload.get("session")
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT session_token FROM users WHERE username = %s", (username,))
-        row = cursor.fetchone()
-        conn.close()
+        with db_cursor_context() as cursor:
+            if not cursor:
+                await websocket.close(code=1011, reason="Database Unavailable")
+                return
+            cursor.execute("SELECT session_token FROM users WHERE username = %s", (username,))
+            row = cursor.fetchone()
 
         # Kick them off the WebSocket if the session is old
         if not row or row[0] != session_token:

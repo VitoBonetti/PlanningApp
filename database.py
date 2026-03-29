@@ -2,6 +2,8 @@ import uuid
 import psycopg2
 import os
 from secrets_manager import get_system_config
+from fastapi import HTTPException
+from contextlib import contextmanager
 
 
 def get_db_connection():
@@ -19,6 +21,44 @@ def get_db_connection():
         dbname=config.get("db_name"),
         sslmode='require'
     )
+
+
+def get_db_cursor():
+    """Safely yields a database cursor and ensures connection closure."""
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database connection unavailable.")
+
+    try:
+        cursor = conn.cursor()
+        yield cursor  # The route uses the cursor here!
+        conn.commit()  # Auto-commit if no errors happened
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@contextmanager
+def db_cursor_context():
+    """A standard Python context manager for WebSockets or background tasks."""
+    conn = get_db_connection()
+    if not conn:
+        yield None
+        return
+
+    try:
+        cursor = conn.cursor()
+        yield cursor
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cursor.close()
+        conn.close()
 
 
 def init_db():

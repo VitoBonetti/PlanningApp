@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Backgro
 import pandas as pd
 import io
 import uuid
-from database import get_db_connection
+from database import get_db_connection, get_db_cursor
 from routers.auth import get_current_user, require_admin, limiter
 from audit_logger import log_audit_event
 
@@ -10,7 +10,7 @@ router = APIRouter(tags=["Assets"])
 
 
 # Excel Parser
-def process_excel_background(contents: bytes):
+def process_excel_background(contents: bytes, cursor = Depends(get_db_cursor)):
     try:
         df = pd.read_excel(io.BytesIO(contents))
         df.columns = df.columns.str.strip()
@@ -19,9 +19,6 @@ def process_excel_background(contents: bytes):
         if 'Status_manual_tracking' in df.columns:
             df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
         df = df.fillna('')
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
 
         for index, row in df.iterrows():
             def get_val(possible_names):
@@ -58,9 +55,6 @@ def process_excel_background(contents: bytes):
                     "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)",
                     (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi,
                      whitebox_category))
-
-        conn.commit()
-        conn.close()
     except Exception as e:
         print(f"Background Import Failed: {e}")
 
@@ -108,11 +102,9 @@ async def import_assets(request: Request, background_tasks: BackgroundTasks, fil
 
 
 @router.get("/assets/")
-def get_available_assets(current_user: dict = Depends(get_current_user)):
+def get_available_assets(current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the asset inventory.")
-    conn = get_db_connection()
-    cursor = conn.cursor()
 
     cursor.execute("SELECT COUNT(*) FROM assets")
     total = cursor.fetchone()[0] or 0
@@ -151,5 +143,4 @@ def get_available_assets(current_user: dict = Depends(get_current_user)):
             "whitebox_category": r[13] or ''
         })
 
-    conn.close()
     return {"assets": assets, "total": total, "assigned": assigned}

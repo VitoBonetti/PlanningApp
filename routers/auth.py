@@ -4,7 +4,7 @@ import jwt
 from datetime import datetime, timedelta, timezone
 import bcrypt
 from secrets_manager import get_system_config
-from database import get_db_connection
+from database import get_db_connection, get_db_cursor
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import uuid
@@ -37,7 +37,7 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 
-def get_current_user(request: Request):
+def get_current_user(request: Request, cursor = Depends(get_db_cursor)):
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -51,11 +51,8 @@ def get_current_user(request: Request):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
     cursor.execute("SELECT id, username, name, role, location, session_token FROM users WHERE username = %s", (username,))
     user = cursor.fetchone()
-    conn.close()
 
     if user is None or user[5] != session_token: 
         raise HTTPException(status_code=401, detail="Session expired or logged in elsewhere.")
@@ -79,14 +76,12 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 
 @router.post("/token")
 @limiter.limit("5/minute")
-def login_for_access_token(request: Request, response: Response, background_tasks: BackgroundTasks, form_data: OAuth2PasswordRequestForm = Depends()):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def login_for_access_token(request: Request, response: Response, background_tasks: BackgroundTasks, form_data: OAuth2PasswordRequestForm = Depends(), cursor = Depends(get_db_cursor)):
+
     cursor.execute("SELECT id, username, hashed_password, role, name, location FROM users WHERE username = %s", (form_data.username,))
     user = cursor.fetchone()
 
     if not user or not verify_password(form_data.password, user[2]):
-        conn.close()
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     # generate Tokens
@@ -100,8 +95,6 @@ def login_for_access_token(request: Request, response: Response, background_task
         "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
         (new_session, refresh_token, user[0])
     )
-    conn.commit()
-    conn.close()
 
     # Issue HttpOnly Cookie!
     response.set_cookie(
@@ -128,13 +121,10 @@ def login_for_access_token(request: Request, response: Response, background_task
 
 @router.post("/auth/refresh")
 @limiter.limit("5/minute")
-def refresh_access_token(request: Request, response: Response):
+def refresh_access_token(request: Request, response: Response, cursor = Depends(get_db_cursor)):
     old_refresh_token = request.cookies.get("refresh_token")
     if not old_refresh_token:
         raise HTTPException(status_code=401, detail="Refresh token missing")
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
 
     # Find the user by this refresh token
     cursor.execute("SELECT id, username FROM users WHERE refresh_token = %s", (old_refresh_token,))
@@ -145,7 +135,6 @@ def refresh_access_token(request: Request, response: Response):
         # it might have been stolen and already rotated.
         # For maximum security, you could find the user by their last known session
         # and wipe ALL their tokens here (Token Reuse Detection).
-        conn.close()
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     # ROTATION: Generate brand new tokens
@@ -158,8 +147,6 @@ def refresh_access_token(request: Request, response: Response):
         "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
         (new_session_id, new_refresh_token, user[0])
     )
-    conn.commit()
-    conn.close()
 
     # Set new cookies
     response.set_cookie(key="access_token", value=new_access_token, httponly=True, secure=True, samesite="lax")
@@ -170,13 +157,9 @@ def refresh_access_token(request: Request, response: Response):
 
 
 @router.post("/logout")
-def logout(response: Response, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def logout(response: Response, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
     # Clear the session token in the database
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET session_token = NULL WHERE id = %s", (current_user["id"],))
-    conn.commit()
-    conn.close()
+    cursor.execute("UPDATE users SET session_token = NULL, refresh_token = NULL WHERE id = %s", (current_user["id"],))
 
     response.delete_cookie("access_token")
     response.delete_cookie("refresh_token")
