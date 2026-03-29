@@ -148,7 +148,7 @@ def update_user(user_id: str, u: UserUpdate, request: Request, background_tasks:
 
 @router.put("/users/{user_id}/reset-password")
 @limiter.limit("5/minute")
-def admin_reset_password(user_id: str, p: AdminPasswordReset, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+def admin_reset_password(user_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     reset_token = str(uuid.uuid4())
     expires = datetime.now() + timedelta(hours=2)  # Shorter expiry for resets
 

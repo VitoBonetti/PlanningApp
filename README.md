@@ -7,3 +7,4 @@
 - [ ] refactor ajax.jsx
 - [ ] refactor database file
 - [ ] flexible whitebox forecast
+- [ ] add extra test to planned test (allow 2 or more test per year for same asset)
