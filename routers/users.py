@@ -13,6 +13,7 @@ import qrcode
 import qrcode.image.svg
 import base64
 from io import BytesIO
+import os
 
 router = APIRouter(tags=["Users"])
 
@@ -38,6 +39,10 @@ def setup_first_admin(admin: FirstAdminSetup, request: Request, cursor = Depends
     cursor.execute(
         'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
         (new_id, admin.username, hashed_pw, admin.name, 'admin', admin.location, 1.0, 1))
+
+    if os.path.exists(".setup_unlocked"):
+        os.remove(".setup_unlocked")
+
     return {"message": "Admin account created successfully!"}
 
 

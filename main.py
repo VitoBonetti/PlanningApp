@@ -14,7 +14,6 @@ from database import get_db_connection, init_db, db_cursor_context
 from audit_logger import init_audit_log_infrastructure
 import os
 
-EPHEMERAL_SETUP_TOKEN = secrets.token_hex(16)
 SYSTEM_IS_SETUP = False
 
 app = FastAPI(title="Pentest Planner API - PRO")
@@ -28,12 +27,11 @@ def startup_event():
         SYSTEM_IS_SETUP = True
     else:
         # 2. Print the token to the console loudly so the admin sees it
+        open(".setup_unlocked", "w").close()
         print("=" * 60)
         print("🚨 DAY 0 SETUP MODE DETECTED 🚨")
-        print("No configuration found in Secret Manager.")
-        print(f"To unlock the setup UI, use this temporary token:")
-        print(f"X-Setup-Token: {EPHEMERAL_SETUP_TOKEN}")
-        print("This token only exists in memory and will be lost on restart.")
+        print("No configuration found. The system is temporarily open for setup.")
+        print("Navigate to the frontend to create the first admin.")
         print("=" * 60)
 
     init_db()
@@ -78,19 +76,13 @@ async def setup_mode_interceptor(request: Request, call_next):
     # 3. If the system is NOT setup, lock everything down except the setup endpoint
     if not SYSTEM_IS_SETUP:
         if request.url.path.startswith("/api/system/setup"):
-            # Require the ephemeral token from the headers
-            provided_token = request.headers.get("X-Setup-Token")
-            if provided_token != EPHEMERAL_SETUP_TOKEN:
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Invalid or missing Setup Token. Check your server logs."}
-                )
+            if not os.path.exists(".setup_unlocked"):
+                return JSONResponse(status_code=403, content={"detail": "Setup is locked."})
             return await call_next(request)
         else:
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "SYSTEM_SETUP_REQUIRED", "message": "System is in Day 0 Setup Mode."}
-            )
+            return JSONResponse(status_code=503, content={"detail": "SYSTEM_SETUP_REQUIRED",
+                                                          "message": "System is in Day 0 Setup Mode."})
+
 
     # 4. If the system IS setup, completely block the setup endpoint!
     if request.url.path.startswith("/api/system/setup"):
