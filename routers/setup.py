@@ -12,6 +12,7 @@ from secrets_manager import get_system_config, save_system_config
 from database import init_db
 import os
 from audit_logger import fetch_recent_audit_logs
+from routers.auth import limiter
 
 
 router = APIRouter(tags=["System Setup"])
@@ -73,7 +74,8 @@ def generate_setup_totp(request: Request):
 
 
 @router.post("/system/setup")
-def execute_system_setup(payload: SetupPayload):
+@limiter.limit("3/minute")
+def execute_system_setup(payload: SetupPayload, request: Request):
     # 1. Prevent running setup twice
     if get_system_config() is not None:
         raise HTTPException(status_code=400, detail="System is already configured.")
@@ -156,5 +158,8 @@ def execute_system_setup(payload: SetupPayload):
     )
     conn.commit()
     conn.close()
+
+    if os.path.exists("/tmp/.setup_unlocked"):
+        os.remove("/tmp/.setup_unlocked")
 
     return {"message": "System successfully initialized! You may now log in."}
