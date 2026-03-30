@@ -28,7 +28,6 @@ def startup_event():
         SYSTEM_IS_SETUP = True
     else:
         # 2. Print the token to the console loudly so the admin sees it
-        open("/tmp/.setup_unlocked", "w").close()
         print("=" * 60)
         print("🚨 DAY 0 SETUP MODE DETECTED 🚨")
         print("No configuration found. The system is temporarily open for setup.")
@@ -80,12 +79,14 @@ async def setup_mode_interceptor(request: Request, call_next):
             SYSTEM_IS_SETUP = True
         else:
             if request.url.path.startswith("/api/system/setup"):
-                if not os.path.exists("/tmp/.setup_unlocked"):
-                    return JSONResponse(status_code=403, content={"detail": "Setup is locked."})
+                # Removed the fragile /tmp file check. 
+                # If config is None, setup is securely unlocked.
                 return await call_next(request)
             else:
-                return JSONResponse(status_code=503, content={"detail": "SYSTEM_SETUP_REQUIRED",
-                                                              "message": "System is in Day 0 Setup Mode."})
+                return JSONResponse(
+                    status_code=503, 
+                    content={"detail": "SYSTEM_SETUP_REQUIRED", "message": "System is in Day 0 Setup Mode."}
+                )
 
 
     # 4. If the system IS setup, completely block the setup endpoint!
