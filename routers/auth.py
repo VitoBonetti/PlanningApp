@@ -111,11 +111,12 @@ def login_for_access_token(request: Request, response: Response, background_task
     hashed_refresh = bcrypt.hashpw(raw_refresh_secret.encode('utf-8'), salt).decode('utf-8')
 
     refresh_cookie_value = f"{user[0]}:{raw_refresh_secret}"
-
+    
     cursor.execute(
         "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
         (new_session, hashed_refresh, user[0])
     )
+    cursor.connection.commit()
 
     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="lax",
                         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60)
@@ -172,7 +173,8 @@ def refresh_access_token(request: Request, response: Response, cursor = Depends(
         "UPDATE users SET session_token = %s, refresh_token = %s WHERE id = %s",
         (new_session_id, new_hashed_refresh, user[0])
     )
-
+    cursor.connection.commit()
+    
     response.set_cookie(key="access_token", value=new_access_token, httponly=True, secure=True, samesite="lax")
     response.set_cookie(key="refresh_token", value=new_refresh_cookie_value, httponly=True, secure=True, samesite="lax",
                         path="/api/auth/refresh")
@@ -184,7 +186,7 @@ def refresh_access_token(request: Request, response: Response, cursor = Depends(
 def logout(response: Response, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
     # Clear the session token in the database
     cursor.execute("UPDATE users SET session_token = NULL, refresh_token = NULL WHERE id = %s", (current_user["id"],))
-
+    cursor.connection.commit()
     response.delete_cookie("access_token")
     response.delete_cookie("refresh_token")
 
