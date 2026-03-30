@@ -25,25 +25,25 @@ def check_system_status(cursor = Depends(get_db_cursor)):
     return {"is_setup": count > 0}
 
 
-@router.post("/system/setup")
-@limiter.limit("3/minute")
-def setup_first_admin(admin: FirstAdminSetup, request: Request, cursor = Depends(get_db_cursor)):
-    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-    if cursor.fetchone()[0] > 0:
-        raise HTTPException(status_code=400, detail="System is already setup.")
+# @router.post("/system/setup")
+# @limiter.limit("3/minute")
+# def setup_first_admin(admin: FirstAdminSetup, request: Request, cursor = Depends(get_db_cursor)):
+#     cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+#     if cursor.fetchone()[0] > 0:
+#         raise HTTPException(status_code=400, detail="System is already setup.")
 
-    salt = bcrypt.gensalt()
-    hashed_pw = bcrypt.hashpw(admin.password.encode('utf-8'), salt).decode('utf-8')
-    new_id = str(uuid.uuid4())
+#     salt = bcrypt.gensalt()
+#     hashed_pw = bcrypt.hashpw(admin.password.encode('utf-8'), salt).decode('utf-8')
+#     new_id = str(uuid.uuid4())
 
-    cursor.execute(
-        'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-        (new_id, admin.username, hashed_pw, admin.name, 'admin', admin.location, 1.0, 1))
+#     cursor.execute(
+#         'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
+#         (new_id, admin.username, hashed_pw, admin.name, 'admin', admin.location, 1.0, 1))
 
-    if os.path.exists("/tmp/.setup_unlocked"):
-        os.remove("/tmp/.setup_unlocked")
+#     if os.path.exists("/tmp/.setup_unlocked"):
+#         os.remove("/tmp/.setup_unlocked")
 
-    return {"message": "Admin account created successfully!"}
+#     return {"message": "Admin account created successfully!"}
 
 
 @router.post("/users/")
