@@ -50,6 +50,10 @@ def get_audit_logs():
 @router.get("/system/setup/totp")
 def generate_setup_totp(request: Request):
     """Generates a provisional TOTP secret and QR code for the Day-0 admin."""
+    
+    if not os.path.exists("/tmp/.setup_unlocked"):
+        raise HTTPException(status_code=403, detail="Setup is locked.")
+    
     if get_system_config() is not None:
         raise HTTPException(status_code=400, detail="System is already configured.")
 
@@ -76,6 +80,9 @@ def generate_setup_totp(request: Request):
 @router.post("/system/setup")
 @limiter.limit("3/minute")
 def execute_system_setup(payload: SetupPayload, request: Request):
+    if not os.path.exists("/tmp/.setup_unlocked"):
+        raise HTTPException(status_code=403, detail="Setup is locked.")
+    
     # 1. Prevent running setup twice
     if get_system_config() is not None:
         raise HTTPException(status_code=400, detail="System is already configured.")
