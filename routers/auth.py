@@ -20,9 +20,24 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 5
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
-config = get_system_config()
-SECRET_KEY = config.get("jwt_secret") if config else secrets.token_urlsafe(32)
+# config = get_system_config()
+# SECRET_KEY = config.get("jwt_secret") if config else secrets.token_urlsafe(32)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+_cached_secret_key = None
+
+
+def get_jwt_secret():
+    global _cached_secret_key
+    if _cached_secret_key:
+        return _cached_secret_key
+    
+    config = get_system_config()
+    if config and "jwt_secret" in config:
+        _cached_secret_key = config["jwt_secret"]
+        return _cached_secret_key
+    
+    # Do NOT cache the fallback, so it checks again after setup finishes
+    return secrets.token_urlsafe(32)
 
 
 def verify_password(plain_password, hashed_password):
@@ -33,7 +48,8 @@ def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    # encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, get_jwt_secret(), algorithm=ALGORITHM)
     return encoded_jwt
 
 
@@ -43,7 +59,8 @@ def get_current_user(request: Request, cursor = Depends(get_db_cursor)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         session_token: str = payload.get("session")
         if username is None or session_token is None: 
