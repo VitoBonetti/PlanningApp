@@ -6,7 +6,8 @@ from websockets_manager import manager
 from routers.auth import get_current_user
 from secrets_manager import get_system_config
 import jwt
-from routers.auth import SECRET_KEY, ALGORITHM, limiter
+# from routers.auth import SECRET_KEY, ALGORITHM, limiter
+from routers.auth import get_jwt_secret, ALGORITHM, limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 import secrets
@@ -124,7 +125,8 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[ALGORITHM])
         username = payload.get("sub")
         session_token = payload.get("session")
 
