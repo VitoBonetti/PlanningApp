@@ -40,8 +40,8 @@ def setup_first_admin(admin: FirstAdminSetup, request: Request, cursor = Depends
         'INSERT INTO users (id, username, hashed_password, name, role, location, base_capacity, start_week) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
         (new_id, admin.username, hashed_pw, admin.name, 'admin', admin.location, 1.0, 1))
 
-    if os.path.exists(".setup_unlocked"):
-        os.remove(".setup_unlocked")
+    if os.path.exists("/tmp/.setup_unlocked"):
+        os.remove("/tmp/.setup_unlocked")
 
     return {"message": "Admin account created successfully!"}
 
