@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 connector = Connector()
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-REGION = os.environ.get("LOCATION")
+LOCATION = os.environ.get("LOCATION")
 INSTANCE_NAME = os.environ.get("DB_INSTANCE_NAME")
 DB_NAME = os.environ.get("POSTGRES_DB")
 DB_USER = os.environ.get("IAM_SA_EMAIL")
@@ -19,7 +19,7 @@ def get_db_connection():
     Creates a passwordless connection to Cloud SQL using IAM.
     The Connector automatically requests and refreshes the OAuth token.
     """
-    instance_connection_name = f"{PROJECT_ID}:{REGION}:{INSTANCE_NAME}"
+    instance_connection_name = f"{PROJECT_ID}:{LOCATION}:{INSTANCE_NAME}"
     config = get_system_config()
 
     try:
