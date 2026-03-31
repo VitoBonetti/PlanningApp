@@ -1,64 +1,30 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from routers import auth, users, assets, tests, board, setup
+from routers import auth, users, assets, tests, board
 from websockets_manager import manager
-from routers.auth import get_current_user
-from secrets_manager import get_system_config
-import jwt
-# from routers.auth import SECRET_KEY, ALGORITHM, limiter
-from routers.auth import get_jwt_secret, ALGORITHM, limiter
-from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
-import secrets
 from database import get_db_connection, init_db, db_cursor_context
 from audit_logger import init_audit_log_infrastructure
 import os
 
-SYSTEM_IS_SETUP = False
-
 app = FastAPI()
+
 
 @app.on_event("startup")
 def startup_event():
-    global SYSTEM_IS_SETUP
-
+    # 1. Initialize Database Tables
     init_db()
 
+    # 2. Check Database Connection
     conn = get_db_connection()
     if conn:
-        try:
-            cursor = conn.cursor()
-            # Check if at least one admin user exists
-            cursor.execute("SELECT COUNT(*) FROM users;")
-            user_count = cursor.fetchone()[0]
-
-            if user_count > 0:
-                SYSTEM_IS_SETUP = True
-                print("✅ System normal. Admin users found.")
-            else:
-                trigger_day_zero()
-
-        except Exception as e:
-            # Fallback if something goes wrong with the count
-            trigger_day_zero()
-        finally:
-            cursor.close()
-            conn.close()
+        print("✅ System normal. Database connected.")
+        conn.close()
     else:
         print("🚨 CRITICAL: Cannot reach Cloud SQL via IAM. Check Service Account permissions.")
 
-    #  Initialize BigQuery Audit Logs
+    # 3. Initialize BigQuery Audit Logs
     init_audit_log_infrastructure()
 
-
-def trigger_day_zero():
-    """Helper function to print the Day 0 warning."""
-    print("=" * 60)
-    print("🚨 DAY 0 SETUP MODE DETECTED 🚨")
-    print("Database is empty. The system is temporarily open for setup.")
-    print("Navigate to the frontend to create the first admin.")
-    print("=" * 60)
 
 env_origins = os.environ.get("ALLOWED_ORIGINS", "")
 
@@ -84,42 +50,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-
-@app.middleware("http")
-async def setup_mode_interceptor(request: Request, call_next):
-    global SYSTEM_IS_SETUP
-
-    if request.method == "OPTIONS":
-        return await call_next(request)
-
-    # Allow traffic to docs and frontend
-    if not request.url.path.startswith("/api/"):
-        return await call_next(request)
-
-    # 3. If the system is NOT setup, lock everything down except the setup endpoint
-    if not SYSTEM_IS_SETUP:
-        if request.url.path.startswith("/api/system/"):
-            return await call_next(request)
-        else:
-            return JSONResponse(
-                status_code=503, 
-                content={"detail": "SYSTEM_SETUP_REQUIRED", "message": "System is in Day 0 Setup Mode."}
-            )
-
-    # 4. If the system IS setup, completely block the POST setup endpoint!
-    if request.url.path == "/api/system/setup" and request.method == "POST":
-        return JSONResponse(
-            status_code=403,
-            content={"detail": "System is already configured. Setup endpoints are disabled."}
-        )
-
-    return await call_next(request)
-
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
 # Wire up all the separated routes!
-app.include_router(setup.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
@@ -136,37 +67,20 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008, reason="Cross-Site Request Blocked")
         return
 
-    token = websocket.cookies.get("access_token")
+    # Accept the connection first
+    await websocket.accept()
 
-    if not token:
-        await websocket.close(code=1008, reason="Missing authentication token")
-        return
+    # Read the secure header attached by Google IAP during the WebSocket upgrade
+    iap_header = websocket.headers.get("x-goog-authenticated-user-email")
+    
+    if not iap_header:
+        # Fallback for local laptop testing
+        username = os.environ.get("MASTER_ADMIN_EMAIL", "admin@yourcompany.com").lower()
+    else:
+        # Extract the email from the IAP header
+        username = iap_header.split(":")[-1].lower()
 
-    try:
-        # payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        payload = jwt.decode(token, get_jwt_secret(), algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        session_token = payload.get("session")
-
-        with db_cursor_context() as cursor:
-            if not cursor:
-                await websocket.close(code=1011, reason="Database Unavailable")
-                return
-            cursor.execute("SELECT session_token FROM users WHERE username = %s", (username,))
-            row = cursor.fetchone()
-
-        # Kick them off the WebSocket if the session is old
-        if not row or row[0] != session_token:
-            await websocket.accept()  # Must accept before sending a message
-            await websocket.send_text('{"event": "SESSION_EXPIRED", "message": "Logged in from another device."}')
-            await websocket.close(code=1008, reason="Session Invalidated")
-            return
-            
-    except Exception as e:
-        print(f"WebSocket Auth Failed: {e}") 
-        await websocket.close(code=1008, reason="Invalid authentication token")
-        return
-
+    # Connect to the Websocket Manager
     await manager.connect(websocket, username)
     try:
         while True:
