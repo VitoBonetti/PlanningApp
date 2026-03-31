@@ -98,22 +98,16 @@ async def setup_mode_interceptor(request: Request, call_next):
 
     # 3. If the system is NOT setup, lock everything down except the setup endpoint
     if not SYSTEM_IS_SETUP:
-        if get_system_config() is not None:
-            SYSTEM_IS_SETUP = True
+        if request.url.path.startswith("/api/system/"):
+            return await call_next(request)
         else:
-            if request.url.path.startswith("/api/system/setup"):
-                # Removed the fragile /tmp file check. 
-                # If config is None, setup is securely unlocked.
-                return await call_next(request)
-            else:
-                return JSONResponse(
-                    status_code=503, 
-                    content={"detail": "SYSTEM_SETUP_REQUIRED", "message": "System is in Day 0 Setup Mode."}
-                )
+            return JSONResponse(
+                status_code=503, 
+                content={"detail": "SYSTEM_SETUP_REQUIRED", "message": "System is in Day 0 Setup Mode."}
+            )
 
-
-    # 4. If the system IS setup, completely block the setup endpoint!
-    if request.url.path.startswith("/api/system/setup"):
+    # 4. If the system IS setup, completely block the POST setup endpoint!
+    if request.url.path == "/api/system/setup" and request.method == "POST":
         return JSONResponse(
             status_code=403,
             content={"detail": "System is already configured. Setup endpoints are disabled."}
