@@ -3,10 +3,14 @@ import os
 from database import get_db_cursor
 from audit_logger import log_audit_event
 from websockets_manager import manager
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["Authentication"])
+limiter = Limiter(key_func=get_remote_address)
 
 MASTER_ADMIN_EMAIL = os.environ.get("MASTER_ADMIN_EMAIL")
+
 
 def get_current_user(request: Request, cursor = Depends(get_db_cursor)):
     # 1. Read the secure header attached by the Google Load Balancer (IAP)
