@@ -119,12 +119,12 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Wire up all the separated routes!
-app.include_router(setup.router)
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(assets.router)
-app.include_router(tests.router)
-app.include_router(board.router)
+app.include_router(setup.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(assets.router, prefix="/api")
+app.include_router(tests.router, prefix="/api")
+app.include_router(board.router, prefix="/api")
 
 # Websocket route
 @app.websocket("/ws/board")
