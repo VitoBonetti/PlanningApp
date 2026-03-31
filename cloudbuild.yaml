@@ -37,3 +37,6 @@ steps:
 
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/gcp-backend:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
