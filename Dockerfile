@@ -18,5 +18,5 @@ RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 # Drop root privileges!
 USER appuser
 
-# Run the server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the server using the dynamic $PORT provided by Cloud Run
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
