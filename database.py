@@ -77,210 +77,96 @@ def db_cursor_context():
 
 
 def init_db():
+    """
+    Ensures the schema exists. 
+    Obsolete auth columns (TOTP, tokens) are no longer managed here.
+    """
     conn = get_db_connection()
-
     if conn is None:
-        print("Skipping DB initialization (Day 0 Setup Mode active)")
         return
 
     c = conn.cursor()
 
     # Core Tables
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (
-                     id
-                     TEXT
-                     PRIMARY
-                     KEY,
-                     username
-                     TEXT
-                     UNIQUE,
-                     hashed_password
-                     TEXT,
-                     name
-                     TEXT,
-                     role
-                     TEXT,
-                     location
-                     TEXT,
-                     base_capacity
-                     REAL,
-                     start_week
-                     INTEGER
-                     DEFAULT
-                     1
-                 )''')
-
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE,
+        hashed_password TEXT,
+        name TEXT,
+        role TEXT,
+        location TEXT,
+        base_capacity REAL,
+        start_week INTEGER DEFAULT 1,
+        session_token TEXT DEFAULT '' -- Kept for backward compatibility with WS
+    )''')
    
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_token TEXT DEFAULT ''")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT DEFAULT NULL")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_totp_enabled BOOLEAN DEFAULT FALSE")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP")
 
-    c.execute('''CREATE TABLE IF NOT EXISTS services
-                 (
-                     id
-                     TEXT
-                     PRIMARY
-                     KEY,
-                     name
-                     TEXT,
-                     max_concurrent_per_week
-                     INTEGER
-                 )''')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS tests
-                 (
-                     id
-                     TEXT
-                     PRIMARY
-                     KEY,
-                     name
-                     TEXT,
-                     service_id
-                     TEXT,
-                     type
-                     TEXT,
-                     credits_per_week
-                     REAL,
-                     duration_weeks
-                     REAL,
-                     start_week
-                     INTEGER,
-                     start_year
-                     INTEGER,
-                     status
-                     TEXT
-                     DEFAULT
-                     'Not Planned'
-                 )''')
-
-    c.execute("ALTER TABLE tests ADD COLUMN IF NOT EXISTS whitebox_category TEXT DEFAULT ''")
-
-    c.execute('''CREATE TABLE IF NOT EXISTS events
-                 (
-                     id
-                     TEXT
-                     PRIMARY
-                     KEY,
-                     user_id
-                     TEXT,
-                     event_type
-                     TEXT,
-                     location
-                     TEXT,
-                     start_date
-                     TEXT,
-                     end_date
-                     TEXT
-                 )''')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS assignments
-                 (
-                     id
-                     TEXT
-                     PRIMARY
-                     KEY,
-                     test_id
-                     TEXT,
-                     user_id
-                     TEXT,
-                     week_number
-                     INTEGER,
-                     year
-                     INTEGER,
-                     allocated_credits
-                     REAL
-                 )''')
-
-   
-    c.execute('''CREATE TABLE IF NOT EXISTS assets
-    (
-        id
-        TEXT
-        PRIMARY
-        KEY,
-        inventory_id
-        TEXT,
-        ext_id
-        TEXT,
-        number
-        TEXT,
-        name
-        TEXT,
-        market
-        TEXT,
-        gost_service
-        TEXT,
-        is_assigned
-        BOOLEAN
-        DEFAULT
-        FALSE,
-        business_critical
-        TEXT,
-        kpi
-        TEXT,
-        whitebox_category
-        TEXT,
-        UNIQUE
-                 (
-        inventory_id,
-        ext_id,
-        number
-                 )
+    c.execute('''CREATE TABLE IF NOT EXISTS services (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            max_concurrent_per_week INTEGER
         )''')
 
-    # Safe Migrations
-    c.execute("ALTER TABLE assets ADD COLUMN IF NOT EXISTS business_critical TEXT DEFAULT ''")
-    c.execute("ALTER TABLE assets ADD COLUMN IF NOT EXISTS kpi TEXT DEFAULT ''")
-    c.execute("ALTER TABLE assets ADD COLUMN IF NOT EXISTS whitebox_category TEXT DEFAULT ''")
+        # 3. Tests Table
+    c.execute('''CREATE TABLE IF NOT EXISTS tests (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        service_id TEXT,
+        type TEXT,
+        credits_per_week REAL,
+        duration_weeks REAL,
+        start_week INTEGER,
+        start_year INTEGER,
+        status TEXT DEFAULT 'Not Planned',
+        whitebox_category TEXT DEFAULT ''
+    )''')
 
-    c.execute('''CREATE TABLE IF NOT EXISTS test_assets
-    (
-        test_id
-        TEXT,
-        asset_id
-        TEXT,
-        FOREIGN
-        KEY
-                 (
-        test_id
-                 ) REFERENCES tests
-                 (
-                     id
-                 ),
-        FOREIGN KEY
-                 (
-                     asset_id
-                 ) REFERENCES assets
-                 (
-                     id
-                 )
-        )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        event_type TEXT,
+        location TEXT,
+        start_date TEXT,
+        end_date TEXT
+    )''')
 
-    c.execute('''CREATE TABLE IF NOT EXISTS notifications
-                 (
-                     id
-                     TEXT
-                     PRIMARY
-                     KEY,
-                     user_id
-                     TEXT,
-                     message
-                     TEXT,
-                     type
-                     TEXT,
-                     created_at
-                     TIMESTAMP
-                     DEFAULT
-                     CURRENT_TIMESTAMP,
-                     is_read
-                     BOOLEAN
-                     DEFAULT
-                     FALSE
-                 )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS assignments (
+        id TEXT PRIMARY KEY,
+        test_id TEXT,
+        user_id TEXT,
+        week_number INTEGER,
+        year INTEGER,
+        allocated_credits REAL
+    )''')
+   
+    c.execute('''CREATE TABLE IF NOT EXISTS assets (
+        id TEXT PRIMARY KEY,
+        inventory_id TEXT,
+        ext_id TEXT,
+        number TEXT,
+        name TEXT,
+        market TEXT,
+        gost_service TEXT,
+        is_assigned BOOLEAN DEFAULT FALSE,
+        business_critical TEXT DEFAULT '',
+        kpi TEXT DEFAULT '',
+        whitebox_category TEXT DEFAULT '',
+        UNIQUE (inventory_id, ext_id, number)
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS test_assets (
+        test_id TEXT REFERENCES tests(id),
+        asset_id TEXT REFERENCES assets(id)
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        message TEXT,
+        type TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_read BOOLEAN DEFAULT FALSE
+    )''')
 
     c.execute("SELECT COUNT(*) FROM services")
     if c.fetchone()[0] == 0:
