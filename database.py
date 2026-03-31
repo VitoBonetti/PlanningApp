@@ -1,26 +1,41 @@
 import uuid
-import psycopg2
+from google.cloud.sql.connector import Connector, IPTypes
 import os
 from secrets_manager import get_system_config
 from fastapi import HTTPException
 from contextlib import contextmanager
 
 
+connector = Connector()
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+REGION = os.environ.get("LOCATION")
+INSTANCE_NAME = os.environ.get("DB_INSTANCE_NAME")
+DB_NAME = os.environ.get("POSTGRES_DB")
+DB_USER = os.environ.get("IAM_SA_EMAIL")
+
+
 def get_db_connection():
+    """
+    Creates a passwordless connection to Cloud SQL using IAM.
+    The Connector automatically requests and refreshes the OAuth token.
+    """
+    instance_connection_name = f"{PROJECT_ID}:{REGION}:{INSTANCE_NAME}"
     config = get_system_config()
 
-    # If config is missing, we are in Day 0 Setup Mode. No database exists yet!
-    if not config:
+    try:
+        # getconn() uses pg8000 and GCP IAM default credentials behind the scenes
+        conn = connector.getconn(
+            instance_connection_name,
+            "pg8000",
+            user=DB_USER,
+            db=DB_NAME,
+            enable_iam_auth=True,  # This tells the connector to use the IAM token!
+            ip_type=IPTypes.PRIVATE  # We are using the Private IP VPC bridge!
+        )
+        return conn
+    except Exception as e:
+        print(f"🚨 Failed to connect to Cloud SQL: {e}")
         return None
-
-    return psycopg2.connect(
-        host=config.get("db_host"),
-        port=config.get("db_port"),
-        user=config.get("db_user"),
-        password=config.get("db_pass"),
-        dbname=config.get("db_name"),
-        sslmode='require'
-    )
 
 
 def get_db_cursor():

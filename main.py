@@ -17,25 +17,48 @@ import os
 
 SYSTEM_IS_SETUP = False
 
-app = FastAPI(title="Pentest Planner API - PRO")
+app = FastAPI()
 
 @app.on_event("startup")
 def startup_event():
     global SYSTEM_IS_SETUP
-    config = get_system_config()
-
-    if config:
-        SYSTEM_IS_SETUP = True
-    else:
-        # 2. Print the token to the console loudly so the admin sees it
-        print("=" * 60)
-        print("🚨 DAY 0 SETUP MODE DETECTED 🚨")
-        print("No configuration found. The system is temporarily open for setup.")
-        print("Navigate to the frontend to create the first admin.")
-        print("=" * 60)
 
     init_db()
+
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            # Check if at least one admin user exists
+            cursor.execute("SELECT COUNT(*) FROM users;")
+            user_count = cursor.fetchone()[0]
+
+            if user_count > 0:
+                SYSTEM_IS_SETUP = True
+                print("✅ System normal. Admin users found.")
+            else:
+                trigger_day_zero()
+
+        except Exception as e:
+            # Fallback if something goes wrong with the count
+            trigger_day_zero()
+        finally:
+            cursor.close()
+            conn.close()
+    else:
+        print("🚨 CRITICAL: Cannot reach Cloud SQL via IAM. Check Service Account permissions.")
+
+    #  Initialize BigQuery Audit Logs
     init_audit_log_infrastructure()
+
+
+def trigger_day_zero():
+    """Helper function to print the Day 0 warning."""
+    print("=" * 60)
+    print("🚨 DAY 0 SETUP MODE DETECTED 🚨")
+    print("Database is empty. The system is temporarily open for setup.")
+    print("Navigate to the frontend to create the first admin.")
+    print("=" * 60)
 
 env_origins = os.environ.get("ALLOWED_ORIGINS", "")
 
