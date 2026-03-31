@@ -23,8 +23,7 @@ def get_db_connection():
     config = get_system_config()
 
     try:
-        # getconn() uses pg8000 and GCP IAM default credentials behind the scenes
-        conn = connector.getconn(
+        conn = connector.connect(
             instance_connection_name,
             "pg8000",
             user=DB_USER,
