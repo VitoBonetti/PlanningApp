@@ -31,7 +31,7 @@ steps:
       - '--subnet'
       - 'gcp-vpc-subnet'
       - '--vpc-egress'
-      - 'all-traffic'
+      - 'private-ranges-only'
       - '--set-env-vars'
       - 'GCP_PROJECT_ID=$PROJECT_ID,LOCATION=europe-west1,DB_INSTANCE_NAME=gost-db,DATASET_ID=gcp_audit_logs,TABLE_ID=security_events,SECRET_ID=system-config,POSTGRES_DB=gost-db,IAM_SA_EMAIL=gcp-backend-sa@gostcontrolpanel.iam'
 
