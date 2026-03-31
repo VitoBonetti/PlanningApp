@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
-import psycopg2
 import uuid
 import bcrypt
 from database import  get_db_cursor

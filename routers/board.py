@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
-import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from database import get_db_connection

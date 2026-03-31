@@ -2,14 +2,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 import secrets
 import bcrypt
-import psycopg2
 import pyotp
 import qrcode
 import qrcode.image.svg
 import base64
 from io import BytesIO
 from secrets_manager import get_system_config, save_system_config
-from database import init_db
+from database import get_db_connection
 import os
 from audit_logger import fetch_recent_audit_logs
 from routers.auth import limiter
@@ -19,30 +18,42 @@ router = APIRouter(tags=["System Setup"])
 
 
 class SetupPayload(BaseModel):
-    use_custom_db: bool
-    db_host: str | None = None
-    db_port: str | None = None
-    db_user: str | None = None
-    db_pass: str | None = None
-    db_name: str | None = None
     admin_username: str
     admin_password: str
     admin_name: str
     totp_secret: str
     totp_code: str
+    # Keep these optional so the old frontend doesn't crash the API
+    use_custom_db: bool | None = None
+    db_host: str | None = None
+    db_port: str | None = None
+    db_user: str | None = None
+    db_pass: str | None = None
+    db_name: str | None = None
 
 
 @router.get("/system/status")
 def get_system_status():
     """The React app calls this on boot to see if it should show the Setup Wizard."""
-    config = get_system_config()
-    return {"setup_required": config is None}
+    # In the cloud architecture, the DB is the source of truth for Day 0
+    conn = get_db_connection()
+    if not conn:
+        return {"setup_required": True}
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users;")
+        user_count = cursor.fetchone()[0]
+        return {"setup_required": user_count == 0}
+    except Exception:
+        return {"setup_required": True}
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
 
 @router.get("/system/audit")
 def get_audit_logs():
     """Returns the most recent system audit logs from BigQuery."""
-    # Note: Because this is an admin view, you could add token dependency here later
-    # to ensure only admins can fetch it!
     logs = fetch_recent_audit_logs()
     return logs
 
@@ -51,9 +62,6 @@ def get_audit_logs():
 def generate_setup_totp(request: Request):
     """Generates a provisional TOTP secret and QR code for the Day-0 admin."""
     
-    if get_system_config() is not None:
-        raise HTTPException(status_code=400, detail="System is already configured.")
-
     # 1. Generate a secure Base32 secret
     secret = pyotp.random_base32()
 
@@ -61,7 +69,7 @@ def generate_setup_totp(request: Request):
     totp = pyotp.TOTP(secret)
     provisioning_uri = totp.provisioning_uri(name="Master Admin", issuer_name="GOST ERP")
 
-    # 3. Generate the QR Code as a base64 image (so the frontend doesn't need extra libraries)
+    # 3. Generate the QR Code as a base64 image
     factory = qrcode.image.svg.SvgImage
     qr = qrcode.make(provisioning_uri, image_factory=factory)
     buffered = BytesIO()
@@ -73,10 +81,57 @@ def generate_setup_totp(request: Request):
         "qr_code": f"data:image/svg+xml;base64,{qr_base64}"
     }
 
-
 @router.post("/system/setup")
 @limiter.limit("3/minute")
 def execute_system_setup(payload: SetupPayload, request: Request):
+    
+    # 1. Verify the Google Authenticator Code
+    totp = pyotp.TOTP(payload.totp_secret)
+    if not totp.verify(payload.totp_code):
+        raise HTTPException(status_code=401, detail="Invalid Authenticator Code. Please try again.")
+
+    # 2. Get our secure IAM database connection
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Could not connect to database via IAM.")
+
+    try:
+        cursor = conn.cursor()
+        
+        # 3. Prevent running setup twice (check DB)
+        cursor.execute("SELECT COUNT(*) FROM users;")
+        if cursor.fetchone()[0] > 0:
+            raise HTTPException(status_code=400, detail="System is already configured.")
+
+        # 4. Generate a massive 256-bit cryptographically secure JWT Secret
+        new_jwt_secret = secrets.token_hex(32)
+
+        # 5. Push ONLY the JWT secret to GCP Secret Manager!
+        master_config = {
+            "jwt_secret": new_jwt_secret
+        }
+        save_system_config(master_config)
+
+        # 6. Insert the First Admin User (And safely save their TOTP secret!)
+        salt = bcrypt.gensalt()
+        hashed_pw = bcrypt.hashpw(payload.admin_password.encode('utf-8'), salt).decode('utf-8')
+        admin_id = secrets.token_hex(8)
+
+        cursor.execute(
+            """INSERT INTO users (id, username, hashed_password, role, name, location, base_capacity, is_totp_enabled, totp_secret) 
+               VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, %s)""",
+            (admin_id, payload.admin_username, hashed_pw, 'admin', payload.admin_name, 'Global', 1.0, payload.totp_secret)
+        )
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Setup failed: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {"message": "System successfully initialized! You may now log in."}
     
     # 1. Prevent running setup twice
     if get_system_config() is not None:
