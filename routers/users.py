@@ -50,7 +50,7 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     return {"message": f"User {u.name} whitelisted in the database."}
-    }
+    
 
 @router.delete("/users/{user_id}")
 def delete_user(user_id: str, background_tasks: BackgroundTasks, 
