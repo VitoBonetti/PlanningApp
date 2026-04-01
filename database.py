@@ -169,6 +169,17 @@ def init_db():
         is_read BOOLEAN DEFAULT FALSE
     )''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS test_history (
+        id TEXT PRIMARY KEY,
+        test_id TEXT REFERENCES tests(id) ON DELETE CASCADE,
+        action TEXT,
+        week_number INTEGER,
+        year INTEGER,
+        changed_by_user_id TEXT,
+        changed_by_username TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
     c.execute("SELECT COUNT(*) FROM services")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO services (id, name, max_concurrent_per_week) VALUES (%s, %s, %s)", [

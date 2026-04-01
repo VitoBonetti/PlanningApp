@@ -11,6 +11,16 @@ from audit_logger import log_audit_event
 router = APIRouter(tags=["Tests & Assignments"])
 
 
+def log_test_history(cursor, test_id: str, action: str, user_id: str, username: str, week_number: int = None, year: int = None):
+    """Inserts a state-change record into the test_history table."""
+    history_id = str(uuid.uuid4())
+    cursor.execute(
+        '''INSERT INTO test_history (id, test_id, action, week_number, year, changed_by_user_id, changed_by_username) 
+           VALUES (%s, %s, %s, %s, %s, %s, %s)''',
+        (history_id, test_id, action, week_number, year, user_id, username)
+    )
+
+
 @router.post("/tests/")
 def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
@@ -28,6 +38,7 @@ def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTas
             # Mark the asset as assigned so it vanishes from the available pool
             cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
 
+    log_test_history(cursor, new_id, "CREATED", current_user["id"], current_user["username"])
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
@@ -40,6 +51,7 @@ def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTas
         resource_id=new_id,
         details=f"Created new test: {t.name}"
     )
+    
     return {"status": "ok", "id": new_id}
 
 
@@ -109,6 +121,8 @@ def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: B
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
     cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s', (schedule.start_week, schedule.start_year, "Planned", test_id))
+
+    log_test_history(cursor, test_id, f"SCHEDULED", current_user["id"], current_user["username"], schedule.start_week, schedule.start_year)
     
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
@@ -148,6 +162,8 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
                    ("Not Planned", test_id,))
+
+    log_test_history(cursor, test_id, "DELETE_TEST", current_user["id"], current_user["username"])
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
@@ -160,6 +176,8 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
         resource_id=test_id,
         details="Moved test back to backlog and cleared assignments."
     )
+
+    log_test_history(cursor, test_id, "UNSCHEDULED", current_user["id"], current_user["username"])
     
     return {"message": "Unscheduled"}
 
@@ -181,6 +199,8 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
     # 3. ORIGINAL: Delete assignments and the test itself
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
+
+    log_test_history(cursor, test_id, "DELETE_TEST", current_user["id"], current_user["username"])
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
@@ -193,6 +213,7 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
         resource_id=test_id,
         details=f"Permanently delete test: {test_id}"
     )
+
     return {"message": "Test permanently deleted and assets freed."}
 
 
@@ -229,6 +250,8 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
 def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
     cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = %s", (test_id,))
+
+    log_test_history(cursor, test_id, "COMPLETED", current_user["id"], current_user["username"])
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
@@ -288,33 +311,40 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
 @router.put("/tests/{test_id}/unable")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     # 1. Fetch the original test details
-    cursor.execute('SELECT name, service_id, type, credits_per_week, duration_weeks, whitebox_category FROM tests WHERE id = %s', (test_id,))
+    cursor.execute('SELECT name, service_id, type, credits_per_week, duration_weeks, start_week, start_year, whitebox_category FROM tests WHERE id = %s', (test_id,))
     row = cursor.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Test not found.")
     
-    name, service_id, t_type, credits, duration, whitebox_cat = row
+    name, service_id, t_type, credits, duration, start_week, start_year, whitebox_cat = row
 
-    # 2. Mark the original test as 'Unable' (This locks it on the board as a burned week)
-    cursor.execute("UPDATE tests SET status = 'Unable' WHERE id = %s", (test_id,))
-
-    # 3. Generate a fresh clone for the Backlog
-    new_test_id = str(uuid.uuid4())
+    # 2. Create the "Tombstone" Clone to stay permanently on the board
+    tombstone_id = str(uuid.uuid4())
     cursor.execute(
-        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-        (new_test_id, name, service_id, t_type, credits, duration, 'Not Planned', whitebox_cat)
+        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+        (tombstone_id, name, service_id, t_type, credits, duration, start_week, start_year, 'Unable', whitebox_cat)
     )
 
-    # 4. Clone the asset relationships so the Backlog item is fully equipped
+    # 3. Move the burned assignments to the Tombstone (shows who wasted their time)
+    cursor.execute('UPDATE assignments SET test_id = %s WHERE test_id = %s', (tombstone_id, test_id))
+
+    # 4. Clone the asset relationships to the Tombstone so the historical record is accurate
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
     assets = cursor.fetchall()
     for (asset_id,) in assets:
-        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
+        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (tombstone_id, asset_id))
 
-    # 5. Instant UI Refresh FIRST!
+    # 5. Send the ORIGINAL test back to the Backlog! (Preserves the exact UUID)
+    cursor.execute("UPDATE tests SET start_week = NULL, start_year = NULL, status = 'Not Planned' WHERE id = %s", (test_id,))
+
+    # 6. Log the state changes in our new history table!
+    log_test_history(cursor, test_id, "MARKED_UNABLE (Returned to Backlog)", current_user["id"], current_user["username"])
+    log_test_history(cursor, tombstone_id, "TOMBSTONE_CREATED_ON_BOARD", current_user["id"], current_user["username"], start_week, start_year)
+
+    # 7. Instant UI Refresh FIRST!
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
-    # 6. Silent Audit Log
+    # 8. Silent Audit Log
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -322,10 +352,10 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks, current_us
         action="MARK_UNABLE",
         resource_type="TEST",
         resource_id=test_id,
-        details=f"Marked '{name}' as Unable. Cloned to Backlog."
+        details=f"Marked '{name}' as Unable. Tombstone left on board, original returned to backlog."
     )
     
-    return {"message": "Test marked as Unable and cloned to the Backlog."}
+    return {"message": "Test marked as Unable. Original preserved in backlog."}
 
 
 @router.post("/assignments/")
