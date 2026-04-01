@@ -5,6 +5,7 @@ import uuid
 from database import get_db_connection, get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, limiter
 from audit_logger import log_audit_event
+from websockets_manager import manager
 
 router = APIRouter(tags=["Assets"])
 
@@ -41,7 +42,6 @@ def process_excel_background(contents: bytes):
                 market = get_val(['Market']) or 'Global'
                 gost_service = get_val(['Gost_service']) or 'Unknown'
 
-                # --- NEW DATA COLUMNS ---
                 business_critical = get_val(['Business Critical']) or ''
                 kpi = get_val(['KPI']) or ''
                 whitebox_category = get_val(['WhiteBox Category']) or ''
@@ -49,16 +49,15 @@ def process_excel_background(contents: bytes):
                 cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
                             (inv_id, ext_id, number))
                 if cursor.fetchone():
-                    # UPDATE existing record with fresh Excel data
                     cursor.execute(
                         "UPDATE assets SET name=%s, market=%s, gost_service=%s, business_critical=%s, kpi=%s, whitebox_category=%s WHERE inventory_id=%s AND ext_id=%s AND number=%s",
                         (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
                 else:
-                    # INSERT new record
                     cursor.execute(
                         "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)",
                         (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi,
                         whitebox_category))
+
         except Exception as e:
             print(f"Background Import Failed: {e}")
 
@@ -94,6 +93,7 @@ async def import_assets(request: Request, background_tasks: BackgroundTasks, fil
         raise HTTPException(status_code=400, detail="Invalid extension. Please use .xls or .xlsx")
 
     background_tasks.add_task(process_excel_background, contents)
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -102,6 +102,9 @@ async def import_assets(request: Request, background_tasks: BackgroundTasks, fil
         resource_type="ASSET_BATCH",
         details=f"Initiated background import of asset file: {file.filename}"
     )
+
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     return {"message": "Excel file received! Importing in the background."}
 
 
