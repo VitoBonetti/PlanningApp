@@ -28,6 +28,9 @@ def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTas
             # Mark the asset as assigned so it vanishes from the available pool
             cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
 
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -37,7 +40,6 @@ def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTas
         resource_id=new_id,
         details=f"Created new test: {t.name}"
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok", "id": new_id}
 
 
@@ -88,6 +90,9 @@ def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: B
                       current_user: dict = Depends(require_admin)):
 
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids)
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -96,8 +101,6 @@ def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: B
         resource_type="TEST_BATCH",
         details=f"Initiated background generation of {len(req.asset_ids)} tests from assets."
     )
-    
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
             
     return {"message": f"Generating {len(req.asset_ids)} tests in the background!"}
 
@@ -107,6 +110,9 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 
     cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s', (schedule.start_week, schedule.start_year, "Planned", test_id))
     
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -116,8 +122,6 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
         resource_id=test_id,
         details=f"Scheduled test for Week {schedule.start_week}, {schedule.start_year}."
     )
-    
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     return {"message": "Scheduled"}
 
@@ -145,6 +149,8 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
     cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
                    ("Not Planned", test_id,))
     
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -154,7 +160,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
         resource_id=test_id,
         details="Moved test back to backlog and cleared assignments."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     return {"message": "Unscheduled"}
 
 
@@ -176,6 +182,8 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
     
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -185,7 +193,6 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
         resource_id=test_id,
         details=f"Permanently delete test: {test_id}"
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test permanently deleted and assets freed."}
 
 
@@ -203,6 +210,8 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
         'UPDATE tests SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, status=COALESCE(%s, status), whitebox_category=%s WHERE id=%s',
         (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
     
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -212,7 +221,7 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
         resource_id=test_id,
         details=f"Updated test attributes."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     return {"message": "Test updated successfully."}
 
 
@@ -220,6 +229,8 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
 def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
     cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = %s", (test_id,))
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
         log_audit_event,
@@ -230,7 +241,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user:
         resource_id=test_id,
         details="Marked test as Completed."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     return {"message": "Test marked as Completed."}
 
 
@@ -259,6 +270,8 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
     for (asset_id,) in assets:
         cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
     
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -268,7 +281,7 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
         resource_id=new_test_id,  # Use the ID of the newly created clone
         details=f"Duplicated test from original ID: {test_id}"
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     return {"message": "Project duplicated to the Backlog!"}
 
 
@@ -326,6 +339,9 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
         cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
                        (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -335,7 +351,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
         resource_id=assign.test_id,
         details=f"Assigned user {assign.user_id} to test for Week {assign.week_number}."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     return {"message": "Assigned"}
 
 
@@ -350,6 +366,9 @@ def remove_assignment(test_id: str, user_id: str, request: Request, background_t
         cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
                        (notif_id, user_id, f"You were removed from {test_row[0]}.", "REMOVAL"))
     cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -359,5 +378,5 @@ def remove_assignment(test_id: str, user_id: str, request: Request, background_t
         resource_id=test_id,
         details=f"Removed user {user_id} from test."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     return {"message": "Unassigned"}

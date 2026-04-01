@@ -94,6 +94,9 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user
               (new_id, e.user_id, e.event_type, e.location, e.start_date, e.end_date))
     conn.commit()
     conn.close()
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -102,7 +105,6 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user
         resource_type="EVENT",
         details="The Holiday has been created."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
 
 
@@ -136,6 +138,9 @@ def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTask
               (e.user_id, e.event_type, e.location, e.start_date, e.end_date, event_id))
     conn.commit()
     conn.close()
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -144,7 +149,6 @@ def update_event(event_id: str, e: EventUpdate, background_tasks: BackgroundTask
         resource_type="EVENT",
         details="The Holiday has been Updated."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday updated"}
 
 
@@ -272,6 +276,9 @@ def wipe_system(request: Request, background_tasks: BackgroundTasks, current_use
 
     conn.commit()
     conn.close()
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -280,7 +287,6 @@ def wipe_system(request: Request, background_tasks: BackgroundTasks, current_use
         resource_type="SYSTEM",
         details="Triggered full database wipe (Tests, Assignments, Events cleared)."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Board wiped clean, all assets freed!"}
 
 

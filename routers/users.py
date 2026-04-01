@@ -37,6 +37,7 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks,
     )
     
     cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
         log_audit_event,
@@ -47,7 +48,6 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks,
         resource_id=u.username,
         details=f"Pre-provisioned {u.role} account for {u.name}"
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     return {"message": f"User {u.name} whitelisted in the database."}
     
@@ -60,6 +60,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
     cursor.execute('DELETE FROM events WHERE user_id = %s', (user_id,))
     cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
     cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
         log_audit_event,
@@ -70,7 +71,6 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
         resource_id=user_id,
         details="Permanently deleted user account metadata."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "User deleted from system."}
 
 @router.put("/users/{user_id}")
@@ -84,6 +84,7 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks,
         'UPDATE users SET name=%s, role=%s, location=%s, base_capacity=%s, start_week=%s WHERE id=%s',
         (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
     cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
         log_audit_event,
@@ -94,7 +95,6 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks,
         resource_id=user_id,
         details="Updated user metadata (role/capacity)."
     )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "User updated."}
 
 @router.get("/users/me")

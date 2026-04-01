@@ -94,6 +94,8 @@ async def import_assets(request: Request, background_tasks: BackgroundTasks, fil
 
     background_tasks.add_task(process_excel_background, contents)
 
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
     background_tasks.add_task(
         log_audit_event,
         user_id=current_user["id"],
@@ -102,9 +104,6 @@ async def import_assets(request: Request, background_tasks: BackgroundTasks, fil
         resource_type="ASSET_BATCH",
         details=f"Initiated background import of asset file: {file.filename}"
     )
-
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    
     return {"message": "Excel file received! Importing in the background."}
 
 
