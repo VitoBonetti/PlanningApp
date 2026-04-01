@@ -3,6 +3,7 @@ from google.cloud.sql.connector import Connector, IPTypes
 import os
 from fastapi import HTTPException
 from contextlib import contextmanager
+from sqlalchemy.pool import QueuePool
 
 
 connector = Connector()
@@ -12,23 +13,26 @@ INSTANCE_NAME = os.environ.get("DB_INSTANCE_NAME")
 DB_NAME = os.environ.get("POSTGRES_DB")
 DB_USER = os.environ.get("IAM_SA_EMAIL")
 
+instance_connection_name = f"{PROJECT_ID}:{LOCATION}:{INSTANCE_NAME}"
+
+def getconn():
+    """This does the heavy cryptographic handshake."""
+    return connector.connect(
+        instance_connection_name,
+        "pg8000",
+        user=DB_USER,
+        db=DB_NAME,
+        enable_iam_auth=True,
+        ip_type=IPTypes.PRIVATE
+    )
+
+# This keeps 10 connections permanently open and ready instantly.
+# If more are needed during a spike, it can overflow up to 20.
+pool = QueuePool(getconn, pool_size=10, max_overflow=20, timeout=30)
 
 def get_db_connection():
-    """
-    Creates a passwordless connection to Cloud SQL using IAM.
-    The Connector automatically requests and refreshes the OAuth token.
-    """
-    instance_connection_name = f"{PROJECT_ID}:{LOCATION}:{INSTANCE_NAME}"
-
     try:
-        conn = connector.connect(
-            instance_connection_name,
-            "pg8000",
-            user=DB_USER,
-            db=DB_NAME,
-            enable_iam_auth=True,  # This tells the connector to use the IAM token!
-            ip_type=IPTypes.PRIVATE  # We are using the Private IP VPC bridge!
-        )
+        return pool.connect()
         return conn
     except Exception as e:
         print(f"🚨 Failed to connect to Cloud SQL: {e}")
