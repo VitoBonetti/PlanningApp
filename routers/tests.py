@@ -51,7 +51,7 @@ def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTas
         resource_id=new_id,
         details=f"Created new test: {t.name}"
     )
-    
+
     return {"status": "ok", "id": new_id}
 
 
@@ -357,6 +357,28 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks, current_us
     
     return {"message": "Test marked as Unable. Original preserved in backlog."}
 
+
+@router.get("/tests/{test_id}/history")
+def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
+    """Retrieves the state-change timeline for a specific test."""
+    cursor.execute('''
+        SELECT action, week_number, year, changed_by_username, timestamp
+        FROM test_history
+        WHERE test_id = %s
+        ORDER BY timestamp DESC
+    ''', (test_id,))
+    
+    rows = cursor.fetchall()
+    return [
+        {
+            "action": r[0],
+            "week_number": r[1],
+            "year": r[2],
+            "username": r[3],
+            "timestamp": r[4]
+        } for r in rows
+    ]
+    
 
 @router.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
