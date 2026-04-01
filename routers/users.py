@@ -21,8 +21,8 @@ def check_system_status(cursor = Depends(get_db_cursor)):
 @router.get("/system/audit")
 def get_system_audit_logs(current_user: dict = Depends(require_admin)):
     """Fetches the latest security audit logs from BigQuery."""
-    # We restrict this to Admins only, and pull the 100 most recent events
-    logs = fetch_recent_audit_logs(limit=100)
+    # We restrict this to Admins only, and pull the 5000 most recent events
+    logs = fetch_recent_audit_logs(limit=5000)
     return logs
 
 
