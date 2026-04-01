@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import os
 import re
 
+_cached_bq_client = None
 
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
@@ -42,11 +43,19 @@ def sanitize_details(details: str) -> str:
 
 
 def get_bq_client():
+    global _cached_bq_client
+
     # Only try to connect if we are in production (or if you have local ADC set up)
     if os.environ.get("ENV") == "local":
         return None
+
+    if _cached_bq_client is not None:
+        return _cached_bq_client
+
     try:
-        return bigquery.Client(project=PROJECT_ID)
+        print("Initializing BigQuery Client for the first time...")
+        _cached_bq_client = bigquery.Client(project=PROJECT_ID)
+        return _cached_bq_client
     except Exception as e:
         print(f"Failed to initialize BigQuery Client: {e}")
         return None
