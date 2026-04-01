@@ -267,6 +267,7 @@ def wipe_system(request: Request, background_tasks: BackgroundTasks, current_use
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments')
+    cursor.execute('DELETE FROM test_history')
     cursor.execute('DELETE FROM tests')
     cursor.execute('DELETE FROM events')  # Clears all holidays
 

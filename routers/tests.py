@@ -199,8 +199,6 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
     # 3. ORIGINAL: Delete assignments and the test itself
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
-
-    log_test_history(cursor, test_id, "DELETE_TEST", current_user["id"], current_user["username"])
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
