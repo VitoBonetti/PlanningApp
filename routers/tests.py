@@ -285,6 +285,49 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
     return {"message": "Project duplicated to the Backlog!"}
 
 
+@router.put("/tests/{test_id}/unable")
+def mark_test_unable(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    # 1. Fetch the original test details
+    cursor.execute('SELECT name, service_id, type, credits_per_week, duration_weeks, whitebox_category FROM tests WHERE id = %s', (test_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+    
+    name, service_id, t_type, credits, duration, whitebox_cat = row
+
+    # 2. Mark the original test as 'Unable' (This locks it on the board as a burned week)
+    cursor.execute("UPDATE tests SET status = 'Unable' WHERE id = %s", (test_id,))
+
+    # 3. Generate a fresh clone for the Backlog
+    new_test_id = str(uuid.uuid4())
+    cursor.execute(
+        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
+        (new_test_id, name, service_id, t_type, credits, duration, 'Not Planned', whitebox_cat)
+    )
+
+    # 4. Clone the asset relationships so the Backlog item is fully equipped
+    cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
+    assets = cursor.fetchall()
+    for (asset_id,) in assets:
+        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
+
+    # 5. Instant UI Refresh FIRST!
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
+    # 6. Silent Audit Log
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="MARK_UNABLE",
+        resource_type="TEST",
+        resource_id=test_id,
+        details=f"Marked '{name}' as Unable. Cloned to Backlog."
+    )
+    
+    return {"message": "Test marked as Unable and cloned to the Backlog."}
+
+
 @router.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
