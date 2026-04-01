@@ -268,12 +268,10 @@ def wipe_system(request: Request, background_tasks: BackgroundTasks, current_use
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assignments')
     cursor.execute('DELETE FROM test_history')
-    cursor.execute('DELETE FROM tests')
-    cursor.execute('DELETE FROM events')  # Clears all holidays
-
-    # NEW: Free up all assets and clear the link table!
-    cursor.execute('DELETE FROM assets')
     cursor.execute('DELETE FROM test_assets')
+    cursor.execute('DELETE FROM tests')
+    cursor.execute('DELETE FROM assets')
+    # cursor.execute('DELETE FROM events')  # Temporary comment out
 
     conn.commit()
     conn.close()
