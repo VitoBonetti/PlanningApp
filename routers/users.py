@@ -4,7 +4,7 @@ from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
 from models import UserCreateSecure, UserUpdate
 from websockets_manager import manager
-from audit_logger import log_audit_event
+from audit_logger import log_audit_event, fetch_recent_audit_logs
 from datetime import datetime, timezone
 
 router = APIRouter(tags=["Users"])
@@ -16,6 +16,14 @@ def check_system_status(cursor = Depends(get_db_cursor)):
     cursor.execute("SELECT COUNT(*) FROM users")
     count = cursor.fetchone()[0]
     return {"setup_required": count == 0}
+
+
+@router.get("/system/audit")
+def get_system_audit_logs(current_user: dict = Depends(require_admin)):
+    """Fetches the latest security audit logs from BigQuery."""
+    # We restrict this to Admins only, and pull the 100 most recent events
+    logs = fetch_recent_audit_logs(limit=100)
+    return logs
 
 
 @router.post("/users/")
