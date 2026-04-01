@@ -96,7 +96,7 @@ def init_db():
         location TEXT,
         base_capacity REAL,
         start_week INTEGER DEFAULT 1,
-        session_token TEXT DEFAULT '' -- Kept for backward compatibility with WS
+        session_token TEXT DEFAULT '' 
     )''')
    
 
