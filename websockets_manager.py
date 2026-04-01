@@ -9,7 +9,7 @@ class ConnectionManager:
         self.active_connections: Dict[WebSocket, str] = {}
 
     async def connect(self, websocket: WebSocket, username: str):
-        await websocket.accept()
+        # await websocket.accept()
         self.active_connections[websocket] = username
         # broadcast that the user joined
         await self.broadcast(f'{{"action": "USER_JOINED", "username": "{username}"}}')
