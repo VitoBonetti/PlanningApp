@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Backgro
 import pandas as pd
 import io
 import uuid
-from database import get_db_connection, get_db_cursor
+from database import get_db_connection, get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, limiter
 from audit_logger import log_audit_event
 
@@ -10,53 +10,57 @@ router = APIRouter(tags=["Assets"])
 
 
 # Excel Parser
-def process_excel_background(contents: bytes, cursor = Depends(get_db_cursor)):
-    try:
-        df = pd.read_excel(io.BytesIO(contents))
-        df.columns = df.columns.str.strip()
-        if 'Pentest Queue' in df.columns:
-            df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
-        if 'Status_manual_tracking' in df.columns:
-            df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
-        df = df.fillna('')
+def process_excel_background(contents: bytes):
+    with db_cursor_context() as cursor:
+        if not cursor:
+            print("Background Import Failed: Could not get DB cursor.")
+            return
+        try:
+            df = pd.read_excel(io.BytesIO(contents))
+            df.columns = df.columns.str.strip()
+            if 'Pentest Queue' in df.columns:
+                df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
+            if 'Status_manual_tracking' in df.columns:
+                df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
+            df = df.fillna('')
 
-        for index, row in df.iterrows():
-            def get_val(possible_names):
-                for col in df.columns:
-                    if str(col).strip().lower() in [n.lower() for n in possible_names]:
-                        val = str(row[col]).strip()
-                        if val and val.lower() != 'nan': return val
-                return ''
+            for index, row in df.iterrows():
+                def get_val(possible_names):
+                    for col in df.columns:
+                        if str(col).strip().lower() in [n.lower() for n in possible_names]:
+                            val = str(row[col]).strip()
+                            if val and val.lower() != 'nan': return val
+                    return ''
 
-            inv_id = get_val(['Inventory Id'])
-            ext_id = get_val(['ID'])
-            number = get_val(['Number'])
-            if not inv_id and not ext_id and not number: continue
+                inv_id = get_val(['Inventory Id'])
+                ext_id = get_val(['ID'])
+                number = get_val(['Number'])
+                if not inv_id and not ext_id and not number: continue
 
-            name = get_val(['Name']) or 'Unknown Asset'
-            market = get_val(['Market']) or 'Global'
-            gost_service = get_val(['Gost_service']) or 'Unknown'
+                name = get_val(['Name']) or 'Unknown Asset'
+                market = get_val(['Market']) or 'Global'
+                gost_service = get_val(['Gost_service']) or 'Unknown'
 
-            # --- NEW DATA COLUMNS ---
-            business_critical = get_val(['Business Critical']) or ''
-            kpi = get_val(['KPI']) or ''
-            whitebox_category = get_val(['WhiteBox Category']) or ''
+                # --- NEW DATA COLUMNS ---
+                business_critical = get_val(['Business Critical']) or ''
+                kpi = get_val(['KPI']) or ''
+                whitebox_category = get_val(['WhiteBox Category']) or ''
 
-            cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
-                           (inv_id, ext_id, number))
-            if cursor.fetchone():
-                # UPDATE existing record with fresh Excel data
-                cursor.execute(
-                    "UPDATE assets SET name=%s, market=%s, gost_service=%s, business_critical=%s, kpi=%s, whitebox_category=%s WHERE inventory_id=%s AND ext_id=%s AND number=%s",
-                    (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
-            else:
-                # INSERT new record
-                cursor.execute(
-                    "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)",
-                    (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi,
-                     whitebox_category))
-    except Exception as e:
-        print(f"Background Import Failed: {e}")
+                cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
+                            (inv_id, ext_id, number))
+                if cursor.fetchone():
+                    # UPDATE existing record with fresh Excel data
+                    cursor.execute(
+                        "UPDATE assets SET name=%s, market=%s, gost_service=%s, business_critical=%s, kpi=%s, whitebox_category=%s WHERE inventory_id=%s AND ext_id=%s AND number=%s",
+                        (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
+                else:
+                    # INSERT new record
+                    cursor.execute(
+                        "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)",
+                        (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi,
+                        whitebox_category))
+        except Exception as e:
+            print(f"Background Import Failed: {e}")
 
 
 @router.post("/assets/import")

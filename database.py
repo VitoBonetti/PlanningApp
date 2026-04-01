@@ -1,7 +1,6 @@
 import uuid
 from google.cloud.sql.connector import Connector, IPTypes
 import os
-from secrets_manager import get_system_config
 from fastapi import HTTPException
 from contextlib import contextmanager
 
@@ -20,7 +19,6 @@ def get_db_connection():
     The Connector automatically requests and refreshes the OAuth token.
     """
     instance_connection_name = f"{PROJECT_ID}:{LOCATION}:{INSTANCE_NAME}"
-    config = get_system_config()
 
     try:
         conn = connector.connect(
