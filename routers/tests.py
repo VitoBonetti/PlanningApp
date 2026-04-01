@@ -42,38 +42,42 @@ def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTas
 
 
 # --- BACKGROUND WORKER: Bulk Test Generator ---
-def process_bulk_tests_background(asset_ids: List[str], cursor = Depends(get_db_cursor)):
-    cursor.execute('SELECT id, name FROM services')
-    services = cursor.fetchall()
-    fallback_service_id = services[0][0] if services else ""
-
-    for asset_id in asset_ids:
-        # 1. NEW: Fetch whitebox_category from the asset!
-        cursor.execute('SELECT name, gost_service, whitebox_category FROM assets WHERE id = %s', (asset_id,))
-        asset = cursor.fetchone()
-        if not asset: continue
-
-        asset_name, gost, whitebox_cat = asset
-        gost = str(gost).lower()
-        matched_service_id = fallback_service_id
-
-        for s_id, s_name in services:
-            s_name_lower = s_name.lower()
-            if ('black' in gost and 'black' in s_name_lower) or ('white' in gost and 'white' in s_name_lower) or (
-                    'adversary' in gost and 'adversary' in s_name_lower) or (
-                    'project' in gost and 'project' in s_name_lower):
-                matched_service_id = s_id
-                break
-
-        new_test_id = str(uuid.uuid4())
-
-        # 2. NEW: Insert the whitebox_cat into the tests table!
-        cursor.execute(
-            'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-            (new_test_id, asset_name, matched_service_id, 'test', 2.0, 1.0, 'Not Planned', whitebox_cat)
-        )
-        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
-        cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
+def process_bulk_tests_background(asset_ids: List[str]):
+    with db_cursor_context() as cursor:
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
+        cursor.execute('SELECT id, name FROM services')
+        services = cursor.fetchall()
+        fallback_service_id = services[0][0] if services else ""
+    
+        for asset_id in asset_ids:
+            # 1. NEW: Fetch whitebox_category from the asset!
+            cursor.execute('SELECT name, gost_service, whitebox_category FROM assets WHERE id = %s', (asset_id,))
+            asset = cursor.fetchone()
+            if not asset: continue
+    
+            asset_name, gost, whitebox_cat = asset
+            gost = str(gost).lower()
+            matched_service_id = fallback_service_id
+    
+            for s_id, s_name in services:
+                s_name_lower = s_name.lower()
+                if ('black' in gost and 'black' in s_name_lower) or ('white' in gost and 'white' in s_name_lower) or (
+                        'adversary' in gost and 'adversary' in s_name_lower) or (
+                        'project' in gost and 'project' in s_name_lower):
+                    matched_service_id = s_id
+                    break
+    
+            new_test_id = str(uuid.uuid4())
+    
+            # 2. NEW: Insert the whitebox_cat into the tests table!
+            cursor.execute(
+                'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
+                (new_test_id, asset_name, matched_service_id, 'test', 2.0, 1.0, 'Not Planned', whitebox_cat)
+            )
+            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
+            cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
 
 
 # Triggers Bulk Generation ---
@@ -92,263 +96,296 @@ def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: B
         resource_type="TEST_BATCH",
         details=f"Initiated background generation of {len(req.asset_ids)} tests from assets."
     )
+    
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+            
     return {"message": f"Generating {len(req.asset_ids)} tests in the background!"}
 
 @router.put("/tests/{test_id}/schedule")
-def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
 
-    cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s', (schedule.start_week, schedule.start_year, "Planned", test_id))
-
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="SCHEDULE_TEST",
-        resource_type="TEST",
-        resource_id=test_id,
-        details=f"Scheduled test for Week {schedule.start_week}, {schedule.start_year}."
-    )
-
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-
-    return {"message": "Scheduled"}
+        cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s', (schedule.start_week, schedule.start_year, "Planned", test_id))
+    
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="SCHEDULE_TEST",
+            resource_type="TEST",
+            resource_id=test_id,
+            details=f"Scheduled test for Week {schedule.start_week}, {schedule.start_year}."
+        )
+    
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    
+        return {"message": "Scheduled"}
 
 
 @router.put("/tests/{test_id}/unschedule")
-def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
 
-    # fetch assigned users and test name BEFORE deleting
-    cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
-    assigned_users = cursor.fetchall()
-
-    cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
-    test_row = cursor.fetchone()
-
-    if test_row:
-        # Insert removal notifications for everyone assigned
-        for (user_id,) in assigned_users:
-            notif_id = str(uuid.uuid4())
-            cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
-                           (notif_id, user_id, f"You were removed from {test_row[0]} because it was unscheduled.",
-                            "REMOVAL"))
-
-    # deletion
-    cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-    cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
-                   ("Not Planned", test_id,))
-
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="UNSCHEDULE_TEST",
-        resource_type="TEST",
-        resource_id=test_id,
-        details="Moved test back to backlog and cleared assignments."
-    )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Unscheduled"}
+        # fetch assigned users and test name BEFORE deleting
+        cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
+        assigned_users = cursor.fetchall()
+    
+        cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
+        test_row = cursor.fetchone()
+    
+        if test_row:
+            # Insert removal notifications for everyone assigned
+            for (user_id,) in assigned_users:
+                notif_id = str(uuid.uuid4())
+                cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+                               (notif_id, user_id, f"You were removed from {test_row[0]} because it was unscheduled.",
+                                "REMOVAL"))
+    
+        # deletion
+        cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
+        cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
+                       ("Not Planned", test_id,))
+    
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="UNSCHEDULE_TEST",
+            resource_type="TEST",
+            resource_id=test_id,
+            details="Moved test back to backlog and cleared assignments."
+        )
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "Unscheduled"}
 
 
 @router.delete("/tests/{test_id}")
 @limiter.limit("5/minute")
-def delete_test(test_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+def delete_test(test_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
 
-    # 1. NEW: Find all assets attached to this test and free them!
-    cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
-    linked_assets = cursor.fetchall()
-
-    for (asset_id,) in linked_assets:
-        cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (asset_id,))
-
-    # 2. NEW: Delete the links from the junction table
-    cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (test_id,))
-
-    # 3. ORIGINAL: Delete assignments and the test itself
-    cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-    cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
-
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="DELETE_TEST",
-        resource_type="TEST",
-        resource_id=test_id,
-        details=f"Permanently delete test: {test_id}"
-    )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test permanently deleted and assets freed."}
+        # 1. NEW: Find all assets attached to this test and free them!
+        cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
+        linked_assets = cursor.fetchall()
+    
+        for (asset_id,) in linked_assets:
+            cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (asset_id,))
+    
+        # 2. NEW: Delete the links from the junction table
+        cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (test_id,))
+    
+        # 3. ORIGINAL: Delete assignments and the test itself
+        cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
+        cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
+    
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="DELETE_TEST",
+            resource_type="TEST",
+            resource_id=test_id,
+            details=f"Permanently delete test: {test_id}"
+        )
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "Test permanently deleted and assets freed."}
 
 
 @router.put("/tests/{test_id}")
 @limiter.limit("10/minute")
-def update_test(test_id: str, request: Request, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+def update_test(test_id: str, request: Request, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
 
-    # If an Admin forces the status back to 'Not Planned', we must clear it off the board!
-    if t.status == 'Not Planned':
-        cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-        cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
-
-    # Update everything else, safely saving the new Status!
-    cursor.execute(
-        'UPDATE tests SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, status=COALESCE(%s, status), whitebox_category=%s WHERE id=%s',
-        (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
-
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="UPDATE_TEST",
-        resource_type="TEST",
-        resource_id=test_id,
-        details=f"Updated test attributes."
-    )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test updated successfully."}
+        # If an Admin forces the status back to 'Not Planned', we must clear it off the board!
+        if t.status == 'Not Planned':
+            cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
+            cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
+    
+        # Update everything else, safely saving the new Status!
+        cursor.execute(
+            'UPDATE tests SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, status=COALESCE(%s, status), whitebox_category=%s WHERE id=%s',
+            (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
+    
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="UPDATE_TEST",
+            resource_type="TEST",
+            resource_id=test_id,
+            details=f"Updated test attributes."
+        )
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "Test updated successfully."}
 
 
 @router.put("/tests/{test_id}/complete")
-def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
-
-    cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = %s", (test_id,))
-
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="COMPLETE_TEST",
-        resource_type="TEST",
-        resource_id=test_id,
-        details="Marked test as Completed."
-    )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test marked as Completed."}
+def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
+        cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = %s", (test_id,))
+    
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="COMPLETE_TEST",
+            resource_type="TEST",
+            resource_id=test_id,
+            details="Marked test as Completed."
+        )
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "Test marked as Completed."}
 
 
 @router.post("/tests/{test_id}/duplicate")
-def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
 
-    # 1. Fetch the original test
-    cursor.execute('SELECT name, service_id, type, credits_per_week, duration_weeks FROM tests WHERE id = %s',
-                   (test_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Test not found.")
-
-    name, service_id, t_type, credits, duration = row
-    new_test_id = str(uuid.uuid4())
-
-    # 2. Insert the clone into the Backlog (Adding " (Copy)" so you can tell them apart easily)
-    cursor.execute(
-        'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (%s, %s, %s, %s, %s, %s, %s)',
-        (new_test_id, f"{name}", service_id, t_type, credits, duration, 'Not Planned')
-    )
-
-    # 3. Clone the asset links too!
-    cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
-    assets = cursor.fetchall()
-    for (asset_id,) in assets:
-        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
-
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="DUPLICATE_TEST",
-        resource_type="TEST",
-        resource_id=new_test_id,  # Use the ID of the newly created clone
-        details=f"Duplicated test from original ID: {test_id}"
-    )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Project duplicated to the Backlog!"}
+        # 1. Fetch the original test
+        cursor.execute('SELECT name, service_id, type, credits_per_week, duration_weeks FROM tests WHERE id = %s',
+                       (test_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Test not found.")
+    
+        name, service_id, t_type, credits, duration = row
+        new_test_id = str(uuid.uuid4())
+    
+        # 2. Insert the clone into the Backlog (Adding " (Copy)" so you can tell them apart easily)
+        cursor.execute(
+            'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+            (new_test_id, f"{name}", service_id, t_type, credits, duration, 'Not Planned')
+        )
+    
+        # 3. Clone the asset links too!
+        cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
+        assets = cursor.fetchall()
+        for (asset_id,) in assets:
+            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
+    
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="DUPLICATE_TEST",
+            resource_type="TEST",
+            resource_id=new_test_id,  # Use the ID of the newly created clone
+            details=f"Duplicated test from original ID: {test_id}"
+        )
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "Project duplicated to the Backlog!"}
 
 
 @router.post("/assignments/")
-def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
-    # NEW RULE: Prevent double booking for this week!
-    cursor.execute('SELECT id FROM assignments WHERE user_id = %s AND week_number = %s AND year = %s',
-                   (assign.user_id, assign.week_number, assign.year))
-    if cursor.fetchone():
-        raise HTTPException(status_code=400, detail="This pentester is already assigned to a test this week!")
-
-    # NEW RULE: Calculate actual capacity to assign (base minus holidays)
-    cursor.execute('SELECT base_capacity, location FROM users WHERE id = %s', (assign.user_id,))
-    base_cap, user_location = cursor.fetchone()
-    cursor.execute(
-        "SELECT start_date, end_date FROM events WHERE user_id = %s OR "
-        "(event_type = 'national_holiday' AND (location = %s OR location = 'Global'))",
-        (assign.user_id, user_location)
-    )
-    events = cursor.fetchall()
-
-    week_dates = []
-    for day in range(1, 6):
-        try:
-            week_dates.append(
-                datetime.strptime(f"{assign.year}-W{assign.week_number}-{day}", "%G-W%V-%u").strftime('%Y-%m-%d'))
-        except ValueError:
-            continue
-
-    days_off = 0
-    for s_str, e_str in events:
-        s = datetime.strptime(s_str, "%Y-%m-%d");
-        e = datetime.strptime(e_str, "%Y-%m-%d")
-        event_dates = [(s + timedelta(days=i)).strftime('%Y-%m-%d') for i in range((e - s).days + 1)]
-        days_off += sum(1 for w in week_dates if w in event_dates)
-
-    # The actual capacity they bring to the test this week
-    actual_provided = max(0.0, base_cap - (days_off * 0.2))
-
-    # NEW IRON-CLAD LOCK: Reject if capacity is 0 or less!
-    if actual_provided <= 0:
-        raise HTTPException(status_code=400,
-                            detail=f"Cannot assign: Pentester is on holiday/has 0 capacity in Week {assign.week_number}.")
-
-    new_id = str(uuid.uuid4())
-    cursor.execute(
-        'INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) VALUES (%s, %s, %s, %s, %s, %s)',
-        (new_id, assign.test_id, assign.user_id, assign.week_number, assign.year, actual_provided))
-
-    cursor.execute("SELECT name FROM tests WHERE id = %s", (assign.test_id,))
-    test_row = cursor.fetchone()
-    if test_row:
-        notif_id = str(uuid.uuid4())
-        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
-                       (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
-                        "ASSIGNMENT"))
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="ASSIGN_PENTESTER",
-        resource_type="ASSIGNMENT",
-        resource_id=assign.test_id,
-        details=f"Assigned user {assign.user_id} to test for Week {assign.week_number}."
-    )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Assigned"}
+def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
+        # Prevent double booking for this week!
+        cursor.execute('SELECT id FROM assignments WHERE user_id = %s AND week_number = %s AND year = %s',
+                       (assign.user_id, assign.week_number, assign.year))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="This pentester is already assigned to a test this week!")
+    
+        # Calculate actual capacity to assign (base minus holidays)
+        cursor.execute('SELECT base_capacity, location FROM users WHERE id = %s', (assign.user_id,))
+        base_cap, user_location = cursor.fetchone()
+        cursor.execute(
+            "SELECT start_date, end_date FROM events WHERE user_id = %s OR "
+            "(event_type = 'national_holiday' AND (location = %s OR location = 'Global'))",
+            (assign.user_id, user_location)
+        )
+        events = cursor.fetchall()
+    
+        week_dates = []
+        for day in range(1, 6):
+            try:
+                week_dates.append(
+                    datetime.strptime(f"{assign.year}-W{assign.week_number}-{day}", "%G-W%V-%u").strftime('%Y-%m-%d'))
+            except ValueError:
+                continue
+    
+        days_off = 0
+        for s_str, e_str in events:
+            s = datetime.strptime(s_str, "%Y-%m-%d");
+            e = datetime.strptime(e_str, "%Y-%m-%d")
+            event_dates = [(s + timedelta(days=i)).strftime('%Y-%m-%d') for i in range((e - s).days + 1)]
+            days_off += sum(1 for w in week_dates if w in event_dates)
+    
+        # The actual capacity they bring to the test this week
+        actual_provided = max(0.0, base_cap - (days_off * 0.2))
+    
+        # Reject if capacity is 0 or less!
+        if actual_provided <= 0:
+            raise HTTPException(status_code=400,
+                                detail=f"Cannot assign: Pentester is on holiday/has 0 capacity in Week {assign.week_number}.")
+    
+        new_id = str(uuid.uuid4())
+        cursor.execute(
+            'INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) VALUES (%s, %s, %s, %s, %s, %s)',
+            (new_id, assign.test_id, assign.user_id, assign.week_number, assign.year, actual_provided))
+    
+        cursor.execute("SELECT name FROM tests WHERE id = %s", (assign.test_id,))
+        test_row = cursor.fetchone()
+        if test_row:
+            notif_id = str(uuid.uuid4())
+            cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+                           (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
+                            "ASSIGNMENT"))
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="ASSIGN_PENTESTER",
+            resource_type="ASSIGNMENT",
+            resource_id=assign.test_id,
+            details=f"Assigned user {assign.user_id} to test for Week {assign.week_number}."
+        )
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "Assigned"}
 
 
 @router.delete("/assignments/{test_id}/{user_id}")
 @limiter.limit("5/minute")
-def remove_assignment(test_id: str, user_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
-
-    cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
-    test_row = cursor.fetchone()
-    if test_row:
-        notif_id = str(uuid.uuid4())
-        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
-                       (notif_id, user_id, f"You were removed from {test_row[0]}.", "REMOVAL"))
-    cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
-    background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="REMOVE_ASSIGNMENT",
-        resource_type="ASSIGNMENT",
-        resource_id=test_id,
-        details=f"Removed user {user_id} from test."
-    )
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Unassigned"}
+def remove_assignment(test_id: str, user_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    with db_cursor_context() as cursor:                  
+        if not cursor:
+            print("Background Bulk Test Failed: Could not get DB cursor.")
+            return
+        cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
+        test_row = cursor.fetchone()
+        if test_row:
+            notif_id = str(uuid.uuid4())
+            cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+                           (notif_id, user_id, f"You were removed from {test_row[0]}.", "REMOVAL"))
+        cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="REMOVE_ASSIGNMENT",
+            resource_type="ASSIGNMENT",
+            resource_id=test_id,
+            details=f"Removed user {user_id} from test."
+        )
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "Unassigned"}
