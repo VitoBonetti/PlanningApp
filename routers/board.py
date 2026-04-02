@@ -63,8 +63,12 @@ def calculate_weekly_capacity(user_id, year, week_number):
     provision = get_user_provision_internal(cursor, user_id, year, week_number)
 
     # Check if they are already assigned to a test this week
-    cursor.execute('SELECT 1 FROM assignments WHERE user_id = %s AND year = %s AND week_number = %s',
-                   (user_id, year, week_number))
+    cursor.execute('''
+        SELECT 1 FROM assignments a
+        JOIN tests t ON a.test_id = t.id
+        WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
+    ''', (user_id, year, week_number))
+
     is_assigned = cursor.fetchone() is not None
     conn.close()
 
@@ -193,16 +197,24 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
     pentesters = [{"id": r[0], "name": r[1], "role": r[2], "location": r[3], "capacity": r[4], "username": r[5],
                    "start_week": r[6]} for r in cursor.fetchall()]
 
-    # FIX: We fetch the assignments but ignore the static 'allocated_credits' column,
-    # recalculating it on-the-fly based on current holidays.
-    cursor.execute(
-        'SELECT a.test_id, a.user_id, a.week_number, u.name FROM assignments a JOIN users u ON a.user_id = u.id')
+    # Join with tests to check the status, and explicitly filter by year
+    cursor.execute('''
+        SELECT a.test_id, a.user_id, a.week_number, u.name, t.status 
+        FROM assignments a 
+        JOIN users u ON a.user_id = u.id
+        JOIN tests t ON a.test_id = t.id
+        WHERE a.year = %s
+    ''', (year,))
     raw_assignments = cursor.fetchall()
 
     assignments = []
     for r in raw_assignments:
         test_id, user_id, week_number, user_name = r
-        dynamic_credits = get_user_provision_internal(cursor, user_id, year, week_number)
+        if test_status == 'Unable':
+            dynamic_credits = 0.0
+        else:
+            dynamic_credits = get_user_provision_internal(cursor, user_id, year, week_number)
+            
         assignments.append({
             "test_id": test_id,
             "user_id": user_id,
@@ -211,20 +223,7 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
             "user_name": user_name
         })
 
-    cursor.execute('''
-                   SELECT id,
-                          name,
-                          service_id,
-                          credits_per_week,
-                          duration_weeks,
-                          start_week,
-                          start_year,
-                          status,
-                          whitebox_category,
-                          type,
-                          (SELECT COUNT(*) FROM test_assets WHERE test_id = tests.id)
-                   FROM tests
-                   ''')
+    cursor.execute('''SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category, type, (SELECT COUNT(*) FROM test_assets WHERE test_id = tests.id) FROM tests''')
     all_tests = cursor.fetchall()
 
     backlog = []
