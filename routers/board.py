@@ -209,7 +209,7 @@ def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(ge
 
     assignments = []
     for r in raw_assignments:
-        test_id, user_id, week_number, user_name = r
+        test_id, user_id, week_number, user_name, test_status = r
         if test_status == 'Unable':
             dynamic_credits = 0.0
         else:
