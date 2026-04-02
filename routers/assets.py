@@ -199,7 +199,7 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
 
 @router.post("/assets/sync-drive")
 @limiter.limit("2/minute")
-def sync_assets_from_drive(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
     GOOGLE_TAB_NAME = os.getenv('GOOGLE_TAB_NAME') 
 
