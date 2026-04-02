@@ -380,12 +380,12 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
 
 @router.put("/tests/{test_id}/revert_complete")
 def revert_test_complete(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
-    """Reverts a 'Completed' test back to 'Scheduled'."""
-    cursor.execute("UPDATE tests SET status = 'Scheduled' WHERE id = %s", (test_id,))
+    """Reverts a 'Completed' test back to 'Planned'."""
+    cursor.execute("UPDATE tests SET status = 'Planned' WHERE id = %s", (test_id,))
     
     log_test_history(cursor, test_id, "REVERTED_COMPLETION", current_user["id"], current_user["username"])
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test reverted to Scheduled."}
+    return {"message": "Test reverted to Planned."}
 
 
 @router.put("/tests/{tombstone_id}/revert_unable")
