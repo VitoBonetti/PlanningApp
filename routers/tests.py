@@ -410,12 +410,14 @@ def revert_test_unable(tombstone_id: str, background_tasks: BackgroundTasks, cur
         cursor.execute("UPDATE tests SET start_week = %s, start_year = %s, status = 'Scheduled' WHERE id = %s", (start_week, start_year, original_id))
         log_test_history(cursor, original_id, "REVERTED_UNABLE", current_user["id"], current_user["username"])
 
-    # 3. Destroy the Tombstone (Database CASCADE will automatically wipe its assets and history)
+    # 3. Destroy the Tombstone's child records FIRST!
+    cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (tombstone_id,))
+    
+    # 4. Now it is safe to delete the Tombstone itself
     cursor.execute('DELETE FROM tests WHERE id = %s', (tombstone_id,))
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unable status reverted."}
-
 
 @router.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
