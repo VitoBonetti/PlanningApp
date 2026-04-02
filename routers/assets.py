@@ -15,6 +15,7 @@ import os
 router = APIRouter(tags=["Assets"])
 
 
+# Helpers
 def parse_bool(val):
     if not val: return False
     return str(val).strip().lower() in ['yes', 'true', '1', 'y']
@@ -346,3 +347,47 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
     except Exception as e:
         print(f"Drive Sync Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to sync from Drive: {str(e)}")
+
+
+@router.get("/assets/raw")
+def get_raw_assets(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # 1. Security Check: Block Pentesters
+    if current_user.get("role") == "pentester":
+        raise HTTPException(status_code=403, detail="Not authorized to view raw corporate data.")
+
+    try:
+        # Fetch all raw assets
+        cursor.execute("SELECT * FROM raw_assets ORDER BY name ASC")
+        columns = [col[0] for col in cursor.description]
+        raw_assets = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        return raw_assets
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/assets/{inventory_id}/{number}/history")
+def get_asset_test_history(inventory_id: str, number: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    if current_user.get("role") == "pentester":
+        raise HTTPException(status_code=403, detail="Not authorized.")
+
+    try:
+        # Reconstruct the UI ID we generated during the sync
+        ui_asset_id = f"{inventory_id}_{number}"
+        
+        # Query your tests table where this asset is involved. 
+        # (Assuming your tests table uses a JSON/array column for asset_ids, or a join table. 
+        # Adjust this SQL if your schema stores the relationship differently!)
+        cursor.execute("""
+            SELECT id, name, type, status, start_week, start_year, credits_per_week, duration_weeks
+            FROM tests 
+            WHERE %s = ANY(asset_ids)
+            ORDER BY start_year DESC, start_week DESC
+        """, (ui_asset_id,))
+        
+        columns = [col[0] for col in cursor.description]
+        history = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        return history
+    except Exception as e:
+        return [] # Return empty history if it fails or table structure differs
