@@ -378,6 +378,45 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
     ]
     
 
+@router.put("/tests/{test_id}/revert_complete")
+def revert_test_complete(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """Reverts a 'Completed' test back to 'Scheduled'."""
+    cursor.execute("UPDATE tests SET status = 'Scheduled' WHERE id = %s", (test_id,))
+    
+    log_test_history(cursor, test_id, "REVERTED_COMPLETION", current_user["id"], current_user["username"])
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Test reverted to Scheduled."}
+
+
+@router.put("/tests/{tombstone_id}/revert_unable")
+def revert_test_unable(tombstone_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """Destroys the Tombstone and puts the original Backlog test back on the board."""
+    # 1. Get the tombstone's data
+    cursor.execute('SELECT name, service_id, start_week, start_year FROM tests WHERE id = %s', (tombstone_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Tombstone not found.")
+    name, service_id, start_week, start_year = row
+
+    # 2. Find the Original test waiting in the backlog
+    cursor.execute("SELECT id FROM tests WHERE name = %s AND service_id = %s AND status = 'Not Planned' LIMIT 1", (name, service_id))
+    original = cursor.fetchone()
+
+    if original:
+        original_id = original[0]
+        # Move assignments back to the original test
+        cursor.execute('UPDATE assignments SET test_id = %s WHERE test_id = %s', (original_id, tombstone_id))
+        # Schedule the original test again
+        cursor.execute("UPDATE tests SET start_week = %s, start_year = %s, status = 'Scheduled' WHERE id = %s", (start_week, start_year, original_id))
+        log_test_history(cursor, original_id, "REVERTED_UNABLE", current_user["id"], current_user["username"])
+
+    # 3. Destroy the Tombstone (Database CASCADE will automatically wipe its assets and history)
+    cursor.execute('DELETE FROM tests WHERE id = %s', (tombstone_id,))
+
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Unable status reverted."}
+
+
 @router.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
