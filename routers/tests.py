@@ -419,12 +419,16 @@ def revert_test_unable(tombstone_id: str, background_tasks: BackgroundTasks, cur
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unable status reverted."}
 
+
 @router.post("/assignments/")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
-    # Prevent double booking for this week!
-    cursor.execute('SELECT id FROM assignments WHERE user_id = %s AND week_number = %s AND year = %s',
-                   (assign.user_id, assign.week_number, assign.year))
+    # Prevent double booking for this week, EXCLUDING 'Unable' tests!
+    cursor.execute('''
+        SELECT a.id FROM assignments a
+        JOIN tests t ON a.test_id = t.id
+        WHERE a.user_id = %s AND a.week_number = %s AND a.year = %s AND t.status != 'Unable'
+    ''', (assign.user_id, assign.week_number, assign.year))
     if cursor.fetchone():
         raise HTTPException(status_code=400, detail="This pentester is already assigned to a test this week!")
     
