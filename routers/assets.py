@@ -366,28 +366,33 @@ def get_raw_assets(current_user: dict = Depends(get_current_user), cursor=Depend
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/assets/{inventory_id}/{number}/history")
-def get_asset_test_history(inventory_id: str, number: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+@router.get("/assets/history")
+def get_asset_test_history(
+    inventory_id: str, 
+    legacy_id: str, 
+    number: str, 
+    current_user: dict = Depends(get_current_user), 
+    cursor=Depends(get_db_cursor)
+):
     if current_user.get("role") == "pentester":
         raise HTTPException(status_code=403, detail="Not authorized.")
 
     try:
-        # Reconstruct the UI ID we generated during the sync
-        ui_asset_id = f"{inventory_id}_{number}"
-        
-        # Query your tests table where this asset is involved. 
-        # (Assuming your tests table uses a JSON/array column for asset_ids, or a join table. 
-        # Adjust this SQL if your schema stores the relationship differently!)
+        # We JOIN the tests table -> test_assets junction table -> assets table
+        # Then we filter by the 3 unique identifiers of the asset!
         cursor.execute("""
-            SELECT id, name, type, status, start_week, start_year, credits_per_week, duration_weeks
-            FROM tests 
-            WHERE %s = ANY(asset_ids)
-            ORDER BY start_year DESC, start_week DESC
-        """, (ui_asset_id,))
+            SELECT t.id, t.name, t.type, t.status, t.start_week, t.start_year, t.credits_per_week, t.duration_weeks
+            FROM tests t
+            JOIN test_assets ta ON t.id = ta.test_id
+            JOIN assets a ON ta.asset_id = a.id
+            WHERE a.inventory_id = %s AND a.ext_id = %s AND a.number = %s
+            ORDER BY t.start_year DESC, t.start_week DESC
+        """, (inventory_id, legacy_id, number))
         
         columns = [col[0] for col in cursor.description]
         history = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
         return history
     except Exception as e:
-        return [] # Return empty history if it fails or table structure differs
+        print(f"History Fetch Error: {e}")
+        return []
