@@ -10,7 +10,7 @@ import google.auth
 from googleapiclient.discovery import build
 from datetime import datetime
 import os
-import urllib.request
+
 
 router = APIRouter(tags=["Assets"])
 
@@ -208,14 +208,6 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
     try:
         # 1. Fetch from Google Sheets
         credentials, project = google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
-
-        try:
-            req = urllib.request.Request("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email", headers={"Metadata-Flavor": "Google"})
-            real_sa_email = urllib.request.urlopen(req, timeout=2).read().decode('utf-8')
-            print(f"🚨 ACTUAL CLOUD RUN EMAIL: {real_sa_email}")
-        except Exception as e:
-            print(f"🚨 METADATA FETCH FAILED: {e}")
-
         service = build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
         result = sheet.values().get(spreadsheetId=GOOGLE_SHEET_ID, range=GOOGLE_TAB_NAME).execute()
@@ -276,7 +268,7 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
                     last_synced_at
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
                 ) ON CONFLICT (inventory_id, legacy_id, number) DO UPDATE SET 
                     name=EXCLUDED.name, managing_organization=EXCLUDED.managing_organization,
                     hosting_location=EXCLUDED.hosting_location, type=EXCLUDED.type, status=EXCLUDED.status, stage=EXCLUDED.stage,
@@ -295,56 +287,24 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
                     confirmed_by_market=EXCLUDED.confirmed_by_market, status_manual_tracking=EXCLUDED.status_manual_tracking,
                     last_synced_at=CURRENT_TIMESTAMP;
             ''', (
-                safe_inv_id, 
-                safe_ext_id, 
-                get_val(['Name']), 
-                get_val(['Managing Organization']), 
-                get_val(['Hosting Location']), 
-                get_val(['Type']), 
-                get_val(['Status']), 
-                get_val(['Stage']), 
-                parse_int(get_val(['Business Critical'])), 
-                parse_int(get_val(['Confidentiality Rating'])), 
-                parse_int(get_val(['Integrity Rating'])), 
-                parse_int(get_val(['Availability Rating'])), 
-                get_val(['Internet Facing']), 
-                get_val(['IaaS, PaaS, SaaS']), 
-                get_val(['Master Record']), 
-                safe_number, 
-                get_val(['Stage_RITM']), 
-                get_val(['Short description']), 
-                get_val(['Requested for']), 
-                get_val(['Opened by']), 
-                get_val(['Company']), 
-                parse_timestamp(get_val(['Created'])), 
-                get_val(['Name of the application']), 
-                get_val(['URL of the application']),
-                parse_date(get_val(['Please provide an estimated date on when you want the pentest to start'])),
-                parse_timestamp(get_val(['Opened'])), 
-                get_val(['State']), 
-                get_val(['Assignment group']), 
-                get_val(['Assigned to']), 
-                get_val(['Assigned to']), 
-                parse_timestamp(get_val(['Closed'])), 
-                get_val(['Closed by']), 
-                get_val(['Close notes']), 
-                get_val(['Service Type']), 
-                get_val(['Market']), 
-                parse_bool(get_val(['KPI'])), 
-                parse_date(get_val(['Date First Seen'])),
-                parse_bool(get_val(['Pentest Queue'])), 
-                get_val(['Gost_service']), 
-                get_val(['WhiteBox Category']), 
-                get_val(['Quarter Planned']), 
-                get_val(['Year Planned']), 
-                parse_bool(get_val(['Planned with RITM'])), 
-                get_val(['Month_Planned']), 
-                get_val(['Week_Planned']), 
-                get_val(['Tested 2024 (RITM)']), 
-                get_val(['Tested 2025 (RITM)']), 
-                get_val(['2027 Prevision']), 
-                parse_bool(get_val(['Confirmed by market'])), 
-                get_val(['Status_manual_tracking'])
+                safe_inv_id, safe_ext_id, get_val(['Name']), get_val(['Managing Organization']), 
+                get_val(['Hosting Location']), get_val(['Type']), get_val(['Status']), get_val(['Stage']), 
+                parse_int(get_val(['Business Critical'])), parse_int(get_val(['Confidentiality Rating'])), 
+                parse_int(get_val(['Integrity Rating'])), parse_int(get_val(['Availability Rating'])), 
+                get_val(['Internet Facing']), get_val(['IaaS, PaaS, SaaS']), get_val(['Master Record']), 
+                safe_number, get_val(['Stage_RITM']), get_val(['Short description']), 
+                get_val(['Requested for']), get_val(['Opened by']), get_val(['Company']), 
+                parse_timestamp(get_val(['Created'])), get_val(['Name of the application']), 
+                get_val(['URL of the application']), parse_date(get_val(['Please provide an estimated date on when you want the pentest to start'])),
+                parse_timestamp(get_val(['Opened'])), get_val(['State']), get_val(['Assignment group']), 
+                get_val(['Assigned to']), parse_timestamp(get_val(['Closed'])), get_val(['Closed by']), 
+                get_val(['Close notes']), get_val(['Service Type']), get_val(['Market']), 
+                parse_bool(get_val(['KPI'])), parse_date(get_val(['Date First Seen'])),
+                parse_bool(get_val(['Pentest Queue'])), get_val(['Gost_service']), 
+                get_val(['WhiteBox Category']), get_val(['Quarter Planned']), get_val(['Year Planned']), 
+                parse_bool(get_val(['Planned with RITM'])), get_val(['Month_Planned']), get_val(['Week_Planned']), 
+                get_val(['Tested 2024 (RITM)']), get_val(['Tested 2025 (RITM)']), get_val(['2027 Prevision']), 
+                parse_bool(get_val(['Confirmed by market'])), get_val(['Status_manual_tracking'])
             ))
 
             # ---------------------------------------------------------
