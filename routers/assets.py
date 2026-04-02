@@ -6,8 +6,53 @@ from database import get_db_connection, get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, limiter
 from audit_logger import log_audit_event
 from websockets_manager import manager
+import google.auth
+from googleapiclient.discovery import build
+from datetime import datetime
 
 router = APIRouter(tags=["Assets"])
+
+
+def parse_bool(val):
+    if not val: return False
+    return str(val).strip().lower() in ['yes', 'true', '1', 'y']
+
+
+def parse_int(val):
+    try:
+        return int(float(val)) if val else None
+    except ValueError:
+        return None
+
+
+def parse_date(val):
+    if not val or str(val).strip().lower() == 'nan': 
+        return None
+    val = str(val).strip()
+    try:
+        # Matches: "2026-01-19"
+        return datetime.strptime(val, "%Y-%m-%d").date()
+    except ValueError:
+        # Fallback just in case a timestamp accidentally snuck into a date column
+        try:
+            return datetime.strptime(val, "%Y-%m-%d %H:%M:%S").date()
+        except ValueError:
+            return None
+
+
+def parse_timestamp(val):
+    if not val or str(val).strip().lower() == 'nan': 
+        return None
+    val = str(val).strip()
+    try:
+        # Matches: "2025-12-11 21:53:40"
+        return datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        # Fallback just in case the time is missing
+        try:
+            return datetime.strptime(val, "%Y-%m-%d")
+        except ValueError:
+            return None
 
 
 # Excel Parser
@@ -150,3 +195,184 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
         })
 
     return {"assets": assets, "total": total, "assigned": assigned}
+
+
+@router.post("/assets/sync-drive")
+@limiter.limit("2/minute")
+def sync_assets_from_drive(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
+    GOOGLE_TAB_NAME = os.getenv('GOOGLE_TAB_NAME') 
+
+    try:
+        # 1. Fetch from Google Sheets
+        credentials, project = google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
+        service = build('sheets', 'v4', credentials=credentials)
+        sheet = service.spreadsheets()
+        result = sheet.values().get(spreadsheetId=GOOGLE_SHEET_ID, range=GOOGLE_TAB_NAME).execute()
+        values = result.get('values', [])
+
+        if not values:
+            raise HTTPException(status_code=404, detail="No data found in the Google Sheet.")
+
+        # 2. Convert directly to your Pandas DataFrame!
+        headers = values[0]
+        rows = values[1:]
+        df = pd.DataFrame(rows, columns=headers)
+        
+        # 3. Apply your exact filtering logic to drop the 4,700 junk rows instantly
+        df.columns = df.columns.str.strip()
+        if 'Pentest Queue' in df.columns:
+            df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
+        if 'Status_manual_tracking' in df.columns:
+            df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
+        df = df.fillna('')
+
+        success_count = 0
+
+        # 4. Iterate through only the remaining ~300 valid rows
+        for index, row in df.iterrows():
+            def get_val(possible_names):
+                for col in df.columns:
+                    if str(col).strip().lower() in [n.lower() for n in possible_names]:
+                        val = str(row[col]).strip()
+                        if val and val.lower() != 'nan': return val
+                return ''
+
+            # Extract Primary Keys
+            inv_id = get_val(['Inventory Id'])
+            ext_id = get_val(['ID'])
+            number = get_val(['Number'])
+            
+            if not inv_id and not ext_id and not number: 
+                continue
+                
+            # Failsafe for composite primary key requirements in raw_assets
+            safe_inv_id = inv_id if inv_id else f"SYS_GEN_{uuid.uuid4().hex[:8]}"
+            safe_number = number if number else "UNASSIGNED"
+            safe_ext_id = parse_int(ext_id) or 0
+
+            # ---------------------------------------------------------
+            # TABLE 1: UPSERT INTO RAW_ASSETS
+            # ---------------------------------------------------------
+            cursor.execute('''
+                INSERT INTO raw_assets (
+                    inventory_id, legacy_id, name, managing_organization, hosting_location, type, status, stage, 
+                    business_critical, confidentiality_rating, integrity_rating, availability_rating, internet_facing, 
+                    iaas_paas_saas, master_record, number, stage_ritm, short_description, requested_for, opened_by, 
+                    company, created, name_of_application, url_of_application, estimated_date_pentest, opened, state, assignment_group, assigned_to, 
+                    closed, closed_by, close_notes, service_type, market, kpi, date_first_seen, pentest_queue, gost_service, 
+                    whitebox_category, quarter_planned, year_planned, planned_with_ritm, month_planned, week_planned, 
+                    tested_2024_ritm, tested_2025_ritm, prevision_2027, confirmed_by_market, status_manual_tracking,
+                    last_synced_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                ) ON CONFLICT (inventory_id, legacy_id, number) DO UPDATE SET 
+                    name=EXCLUDED.name, managing_organization=EXCLUDED.managing_organization,
+                    hosting_location=EXCLUDED.hosting_location, type=EXCLUDED.type, status=EXCLUDED.status, stage=EXCLUDED.stage,
+                    business_critical=EXCLUDED.business_critical, confidentiality_rating=EXCLUDED.confidentiality_rating,
+                    integrity_rating=EXCLUDED.integrity_rating, availability_rating=EXCLUDED.availability_rating,
+                    internet_facing=EXCLUDED.internet_facing, iaas_paas_saas=EXCLUDED.iaas_paas_saas, master_record=EXCLUDED.master_record,
+                    stage_ritm=EXCLUDED.stage_ritm, short_description=EXCLUDED.short_description,
+                    requested_for=EXCLUDED.requested_for, opened_by=EXCLUDED.opened_by, company=EXCLUDED.company, created=EXCLUDED.created,
+                    name_of_application=EXCLUDED.name_of_application, url_of_application=EXCLUDED.url_of_application, estimated_date_pentest=EXCLUDED.estimated_date_pentest, 
+                    opened=EXCLUDED.opened, state=EXCLUDED.state, assignment_group=EXCLUDED.assignment_group, assigned_to=EXCLUDED.assigned_to,
+                    closed=EXCLUDED.closed, closed_by=EXCLUDED.closed_by, close_notes=EXCLUDED.close_notes, service_type=EXCLUDED.service_type,
+                    market=EXCLUDED.market, kpi=EXCLUDED.kpi, date_first_seen=EXCLUDED.date_first_seen, pentest_queue=EXCLUDED.pentest_queue, gost_service=EXCLUDED.gost_service,
+                    whitebox_category=EXCLUDED.whitebox_category, quarter_planned=EXCLUDED.quarter_planned, year_planned=EXCLUDED.year_planned,
+                    planned_with_ritm=EXCLUDED.planned_with_ritm, month_planned=EXCLUDED.month_planned, week_planned=EXCLUDED.week_planned,
+                    tested_2024_ritm=EXCLUDED.tested_2024_ritm, tested_2025_ritm=EXCLUDED.tested_2025_ritm, prevision_2027=EXCLUDED.prevision_2027,
+                    confirmed_by_market=EXCLUDED.confirmed_by_market, status_manual_tracking=EXCLUDED.status_manual_tracking,
+                    last_synced_at=CURRENT_TIMESTAMP;
+            ''', (
+                safe_inv_id, 
+                safe_ext_id, 
+                get_val(['Name']), 
+                get_val(['Managing Organization']), 
+                get_val(['Hosting Location']), 
+                get_val(['Type']), 
+                get_val(['Status']), 
+                get_val(['Stage']), 
+                parse_int(get_val(['Business Critical'])), 
+                parse_int(get_val(['Confidentiality Rating'])), 
+                parse_int(get_val(['Integrity Rating'])), 
+                parse_int(get_val(['Availability Rating'])), 
+                get_val(['Internet Facing']), 
+                get_val(['IaaS, PaaS, SaaS']), 
+                get_val(['Master Record']), 
+                safe_number, 
+                get_val(['Stage_RITM']), 
+                get_val(['Short description']), 
+                get_val(['Requested for']), 
+                get_val(['Opened by']), 
+                get_val(['Company']), 
+                parse_timestamp(get_val(['Created'])), 
+                get_val(['Name of the application']), 
+                get_val(['URL of the application']),
+                parse_date(get_val(['Please provide an estimated date on when you want the pentest to start'])),
+                parse_timestamp(get_val(['Opened'])), 
+                get_val(['State']), 
+                get_val(['Assignment group']), 
+                get_val(['Assigned to']), 
+                get_val(['Assigned to']), 
+                parse_timestamp(get_val(['Closed'])), 
+                get_val(['Closed by']), 
+                get_val(['Close notes']), 
+                get_val(['Service Type']), 
+                get_val(['Market']), 
+                parse_bool(get_val(['KPI'])), 
+                parse_date(get_val(['Date First Seen'])),
+                parse_bool(get_val(['Pentest Queue'])), 
+                get_val(['Gost_service']), 
+                get_val(['WhiteBox Category']), 
+                get_val(['Quarter Planned']), 
+                get_val(['Year Planned']), 
+                parse_bool(get_val(['Planned with RITM'])), 
+                get_val(['Month_Planned']), 
+                get_val(['Week_Planned']), 
+                get_val(['Tested 2024 (RITM)']), 
+                get_val(['Tested 2025 (RITM)']), 
+                get_val(['2027 Prevision']), 
+                parse_bool(get_val(['Confirmed by market'])), 
+                get_val(['Status_manual_tracking'])
+            ))
+
+            # ---------------------------------------------------------
+            # TABLE 2: YOUR ORIGINAL PLANNER ASSETS LOGIC
+            # ---------------------------------------------------------
+            name = get_val(['Name']) or 'Unknown Asset'
+            market = get_val(['Market']) or 'Global'
+            gost_service = get_val(['Gost_service']) or 'Unknown'
+            business_critical = get_val(['Business Critical']) or ''
+            kpi = get_val(['KPI']) or ''
+            whitebox_category = get_val(['WhiteBox Category']) or ''
+
+            # We use your exact manual lookup using all 3 fields for the Planner UI table
+            cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
+                           (inv_id, ext_id, number))
+            if cursor.fetchone():
+                cursor.execute(
+                    "UPDATE assets SET name=%s, market=%s, gost_service=%s, business_critical=%s, kpi=%s, whitebox_category=%s WHERE inventory_id=%s AND ext_id=%s AND number=%s",
+                    (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
+            else:
+                cursor.execute(
+                    "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)",
+                    (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi, whitebox_category))
+
+            success_count += 1
+
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="SYNC_GOOGLE_DRIVE",
+            resource_type="ASSET_INVENTORY",
+            details=f"Synced {success_count} filtered assets from Google Drive to raw and planner tables."
+        )
+
+        return {"message": f"Successfully synced {success_count} filtered assets from Google Drive!"}
+
+    except Exception as e:
+        print(f"Drive Sync Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync from Drive: {str(e)}")

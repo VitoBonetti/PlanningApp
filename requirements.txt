@@ -17,3 +17,5 @@ qrcode==8.2
 cloud-sql-python-connector==1.20.1
 sqlalchemy==2.1.0b1
 pg8000==1.31.5
+google-api-python-client==2.193.0
+google-auth==2.49.1
