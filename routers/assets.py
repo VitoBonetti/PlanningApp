@@ -369,7 +369,6 @@ def get_raw_assets(current_user: dict = Depends(get_current_user), cursor=Depend
 @router.get("/assets/history")
 def get_asset_test_history(
     inventory_id: str, 
-    legacy_id: str, 
     number: str, 
     current_user: dict = Depends(get_current_user), 
     cursor=Depends(get_db_cursor)
@@ -378,16 +377,15 @@ def get_asset_test_history(
         raise HTTPException(status_code=403, detail="Not authorized.")
 
     try:
-        # We JOIN the tests table -> test_assets junction table -> assets table
-        # Then we filter by the 3 unique identifiers of the asset!
+        # Safely joining without ext_id/legacy_id to avoid the 0 vs "" mismatch!
         cursor.execute("""
             SELECT t.id, t.name, t.type, t.status, t.start_week, t.start_year, t.credits_per_week, t.duration_weeks
             FROM tests t
             JOIN test_assets ta ON t.id = ta.test_id
             JOIN assets a ON ta.asset_id = a.id
-            WHERE a.inventory_id = %s AND a.ext_id = %s AND a.number = %s
+            WHERE a.inventory_id = %s AND a.number = %s
             ORDER BY t.start_year DESC, t.start_week DESC
-        """, (inventory_id, legacy_id, number))
+        """, (inventory_id, number))
         
         columns = [col[0] for col in cursor.description]
         history = [dict(zip(columns, row)) for row in cursor.fetchall()]
