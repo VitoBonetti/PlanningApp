@@ -10,6 +10,7 @@ import google.auth
 from googleapiclient.discovery import build
 from datetime import datetime
 import os
+import urllib.request
 
 router = APIRouter(tags=["Assets"])
 
@@ -207,8 +208,14 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
     try:
         # 1. Fetch from Google Sheets
         credentials, project = google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
-        print(f"🕵️ INVESTIGATION - PROJECT: {project}")
-        print(f"🕵️ INVESTIGATION - SERVICE ACCOUNT: {credentials.service_account_email}")
+
+        try:
+            req = urllib.request.Request("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email", headers={"Metadata-Flavor": "Google"})
+            real_sa_email = urllib.request.urlopen(req, timeout=2).read().decode('utf-8')
+            print(f"🚨 ACTUAL CLOUD RUN EMAIL: {real_sa_email}")
+        except Exception as e:
+            print(f"🚨 METADATA FETCH FAILED: {e}")
+
         service = build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
         result = sheet.values().get(spreadsheetId=GOOGLE_SHEET_ID, range=GOOGLE_TAB_NAME).execute()
