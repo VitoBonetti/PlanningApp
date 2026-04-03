@@ -137,7 +137,8 @@ def sync_to_database(df):
             def get_val(possible_names):
                 for col in df.columns:
                     if str(col).strip().lower() in [n.lower() for n in possible_names]:
-                        val = str(row[col]).strip()
+                        # NEW: .lstrip("'") removes the hidden Excel text-formatting apostrophe!
+                        val = str(row[col]).strip().lstrip("'")
                         if val and val.lower() != 'nan': return val
                 return ''
 
