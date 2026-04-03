@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request, Query
 import pandas as pd
 import io
 import uuid
@@ -12,6 +12,7 @@ from datetime import datetime
 import os
 from models import AssetTrackingUpdate
 from services.importer import run_import_job
+from typing import Optional
 
 router = APIRouter(tags=["Assets"])
 
@@ -161,31 +162,45 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the asset inventory.")
 
-    cursor.execute("SELECT COUNT(*) FROM assets")
+    cursor.execute("""
+        SELECT COUNT(*) FROM assets a
+        JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
+        WHERE ra.pentest_queue = TRUE 
+          AND (ra.status_manual_tracking IS NULL OR ra.status_manual_tracking != '2027')
+    """)
     total = cursor.fetchone()[0] or 0
-    cursor.execute("SELECT COUNT(*) FROM assets WHERE is_assigned")
+    cursor.execute("""
+        SELECT COUNT(*) FROM assets a
+        JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
+        WHERE a.is_assigned = TRUE 
+          AND ra.pentest_queue = TRUE 
+          AND (ra.status_manual_tracking IS NULL OR ra.status_manual_tracking != '2027')
+    """)
     assigned = cursor.fetchone()[0] or 0
 
     # Fetch the new columns from the DB
     cursor.execute('''
-                   SELECT a.id,
-                          a.inventory_id,
-                          a.ext_id,
-                          a.number,
-                          a.name,
-                          a.market,
-                          a.gost_service,
-                          a.is_assigned,
-                          t.status,
-                          t.start_week,
-                          t.start_year,
-                          a.business_critical,
-                          a.kpi,
-                          a.whitebox_category
-                   FROM assets a
-                            LEFT JOIN test_assets ta ON a.id = ta.asset_id
-                            LEFT JOIN tests t ON ta.test_id = t.id
-                   ''')
+        SELECT a.id,
+               a.inventory_id,
+               a.ext_id,
+               a.number,
+               a.name,
+               a.market,
+               a.gost_service,
+               a.is_assigned,
+               t.status,
+               t.start_week,
+               t.start_year,
+               a.business_critical,
+               a.kpi,
+               a.whitebox_category
+        FROM assets a
+        JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
+        LEFT JOIN test_assets ta ON a.id = ta.asset_id
+        LEFT JOIN tests t ON ta.test_id = t.id
+        WHERE ra.pentest_queue = TRUE 
+          AND (ra.status_manual_tracking IS NULL OR ra.status_manual_tracking != '2027')
+    ''')
 
     assets = []
     for r in cursor.fetchall():
@@ -377,18 +392,55 @@ def sync_assets_from_drive(
 
 
 @router.get("/assets/raw")
-def get_raw_assets(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    # 1. Security Check: Block Pentesters
+def get_raw_assets(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    search: Optional[str] = None,
+    market: Optional[str] = None,
+    current_user: dict = Depends(get_current_user), 
+    cursor=Depends(get_db_cursor)
+):
+    # Security Check
     if current_user.get("role") == "pentester":
         raise HTTPException(status_code=403, detail="Not authorized to view raw corporate data.")
 
     try:
-        # Fetch all raw assets
-        cursor.execute("SELECT * FROM raw_assets ORDER BY name ASC")
+        offset = (page - 1) * limit
+        params = []
+        where_clauses = []
+
+        # Dynamic Filtering
+        if search:
+            where_clauses.append("(name ILIKE %s OR inventory_id ILIKE %s OR number ILIKE %s)")
+            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        if market:
+            where_clauses.append("market ILIKE %s")
+            params.append(f"%{market}%")
+
+        where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+        # 1. Get the total count for the frontend pagination math
+        count_query = f"SELECT COUNT(*) FROM raw_assets {where_str}"
+        cursor.execute(count_query, tuple(params))
+        total_items = cursor.fetchone()[0]
+
+        # 2. Get the specific page of data
+        data_query = f"SELECT * FROM raw_assets {where_str} ORDER BY name ASC LIMIT %s OFFSET %s"
+        cursor.execute(data_query, tuple(params + [limit, offset]))
+        
         columns = [col[0] for col in cursor.description]
         raw_assets = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
-        return raw_assets
+        # Return the payload in a paginated wrapper!
+        return {
+            "data": raw_assets,
+            "pagination": {
+                "total": total_items,
+                "page": page,
+                "limit": limit,
+                "pages": (total_items + limit - 1) // limit
+            }
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
