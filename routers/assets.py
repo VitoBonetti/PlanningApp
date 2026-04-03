@@ -558,3 +558,16 @@ def update_asset_tracking(
         print(f"Update Tracking Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Temp function to bring back to live the Adv Sim test.
+@router.post("/assets/resurrect-ghosts")
+def resurrect_ghost_assets(cursor=Depends(get_db_cursor)):
+    # This finds all assets that are missing from raw_assets and copies them over!
+    cursor.execute('''
+        INSERT INTO raw_assets (inventory_id, legacy_id, number, name, market, gost_service, pentest_queue)
+        SELECT a.inventory_id, a.ext_id, a.number, a.name, a.market, a.gost_service, TRUE
+        FROM assets a
+        LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
+        WHERE ra.inventory_id IS NULL;
+    ''')
+    return {"message": "Ghost assets resurrected!"}

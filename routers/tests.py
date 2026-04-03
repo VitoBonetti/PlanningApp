@@ -21,9 +21,17 @@ def log_test_history(cursor, test_id: str, action: str, user_id: str, username: 
     )
 
 
-@router.post("/tests/")
-def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 
+@router.post("/tests/")
+def create_test(
+    t: TestCreate, 
+    request: Request, 
+    background_tasks: BackgroundTasks, 
+    current_user: dict = Depends(require_admin), 
+    cursor = Depends(get_db_cursor)
+):
     new_id = str(uuid.uuid4())
     cursor.execute(
         'INSERT INTO tests (id, name, service_id, type, credits_per_week, duration_weeks, status, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
@@ -32,15 +40,41 @@ def create_test(t: TestCreate, request: Request, background_tasks: BackgroundTas
 
     # Link the assets and mark them as assigned!
     if t.asset_ids:
+        # STANDARD WORKFLOW: Link existing selected assets
         for asset_id in t.asset_ids:
             # Add to junction table
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, asset_id))
             # Mark the asset as assigned so it vanishes from the available pool
             cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
+    else:
+        # MANUAL/ADVERSARY WORKFLOW: Generate a dummy asset automatically!
+        # Adding a short hex to the ticket number ensures it never hits a UNIQUE constraint collision
+        inv_id = f"MANUAL_GEN_{uuid.uuid4().hex[:8]}"
+        number = f"MANUAL_TCKT_{uuid.uuid4().hex[:4]}"
+        asset_id = str(uuid.uuid4())
+        asset_name = f"Manual Asset: {t.name}"
+        
+        # 1. Insert into the Master Database (raw_assets)
+        # We stamp it with today's date so it doesn't cause errors in your Looker Dashboard
+        cursor.execute('''
+            INSERT INTO raw_assets (inventory_id, legacy_id, number, name, pentest_queue, gost_service, date_first_seen, status_manual_tracking)
+            VALUES (%s, '0', %s, %s, TRUE, 'Adversary / Manual', CURRENT_DATE, 'Not Planned')
+        ''', (inv_id, number, asset_name))
+        
+        # 2. Insert into the UI Table (assets)
+        cursor.execute('''
+            INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned)
+            VALUES (%s, %s, '0', %s, %s, 'Global', 'Adversary / Manual', TRUE)
+        ''', (asset_id, inv_id, number, asset_name))
+        
+        # 3. Link it to the newly created test!
+        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, asset_id))
 
+    # Logging and Background Tasks
     log_test_history(cursor, new_id, "CREATED", current_user["id"], current_user["username"])
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}') # Good idea to refresh the asset list too!
 
     background_tasks.add_task(
         log_audit_event,
