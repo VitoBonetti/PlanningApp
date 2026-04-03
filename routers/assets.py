@@ -61,6 +61,11 @@ def parse_timestamp(val):
 
 
 # Excel Parser
+import pandas as pd
+import io
+import uuid
+
+
 def process_excel_background(contents: bytes):
     with db_cursor_context() as cursor:
         if not cursor:
@@ -69,44 +74,161 @@ def process_excel_background(contents: bytes):
         try:
             df = pd.read_excel(io.BytesIO(contents))
             df.columns = df.columns.str.strip()
+            
             if 'Pentest Queue' in df.columns:
                 df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
             if 'Status_manual_tracking' in df.columns:
                 df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
+            
             df = df.fillna('')
 
             for index, row in df.iterrows():
+                # Extract clean values, stripping Excel formatting artifacts
                 def get_val(possible_names):
                     for col in df.columns:
                         if str(col).strip().lower() in [n.lower() for n in possible_names]:
-                            val = str(row[col]).strip()
+                            val = str(row[col]).strip().lstrip("'")
                             if val and val.lower() != 'nan': return val
                     return ''
 
+                # Specific fuzzy matcher for that long ServiceNow Date header
+                def get_estimated_date():
+                    for col in df.columns:
+                        if 'estimated date' in str(col).lower():
+                            val = str(row[col]).strip().lstrip("'")
+                            if val and val.lower() != 'nan': return val
+                    return ''
+
+                # 1. Primary Keys
                 inv_id = get_val(['Inventory Id'])
                 ext_id = get_val(['ID'])
                 number = get_val(['Number'])
+                
                 if not inv_id and not ext_id and not number: continue
 
+                safe_inv_id = inv_id or f"EXCEL_{uuid.uuid4().hex[:8]}"
+                safe_ext_id = ext_id or "0"
+                safe_number = number or f"TCKT_{uuid.uuid4().hex[:6]}"
+
+                # 2. Extract General Info
                 name = get_val(['Name']) or 'Unknown Asset'
+                managing_org = get_val(['Managing Organization'])
+                hosting_loc = get_val(['Hosting Location'])
+                type_val = get_val(['Type'])
+                status_val = get_val(['Status'])
+                stage_val = get_val(['Stage'])
+                
+                business_critical = get_val(['Business Critical'])
+                confidentiality = get_val(['Confidentiality Rating'])
+                integrity = get_val(['Integrity Rating'])
+                availability = get_val(['Availability Rating'])
+                
+                internet_facing = get_val(['Internet Facing'])
+                iaas_paas_saas = get_val(['IaaS, PaaS, SaaS', 'IaaS / PaaS / SaaS'])
+                master_record = get_val(['Master Record'])
+                
+                # 3. ServiceNow Ticketing Info
+                stage_ritm = get_val(['Stage_RITM', 'Stage RITM'])
+                short_desc = get_val(['Short description'])
+                requested_for = get_val(['Requested for'])
+                opened_by = get_val(['Opened by'])
+                company = get_val(['Company'])
+                created_val = get_val(['Created'])
+                app_name = get_val(['Name of the application', 'Name of Application'])
+                app_url = get_val(['URL of the application', 'URL'])
+                est_date = get_estimated_date()
+                opened_val = get_val(['Opened'])
+                state_val = get_val(['State'])
+                assignment_group = get_val(['Assignment group'])
+                assigned_to = get_val(['Assigned to'])
+                closed_val = get_val(['Closed'])
+                closed_by = get_val(['Closed by'])
+                close_notes = get_val(['Close notes'])
+                service_type = get_val(['Service Type'])
+                
+                # 4. Custom Gost/Tracking Info
                 market = get_val(['Market']) or 'Global'
-                gost_service = get_val(['Gost_service']) or 'Unknown'
+                gost_service = get_val(['Gost_service', 'Gost Service']) or 'Adversary / Manual'
+                whitebox_category = get_val(['WhiteBox Category', 'Whitebox Category'])
+                quarter_planned = get_val(['Quarter Planned', 'Quarter_Planned'])
+                year_planned = get_val(['Year Planned', 'Year_Planned'])
+                month_planned = get_val(['Month Planned', 'Month_Planned'])
+                week_planned = get_val(['Week Planned', 'Week_Planned'])
+                tested_2024 = get_val(['Tested 2024 RITM', 'Tested_2024_RITM'])
+                tested_2025 = get_val(['Tested 2025 RITM', 'Tested_2025_RITM'])
+                prev_2027 = get_val(['Prevision 2027', 'Prevision_2027'])
+                status_manual = get_val(['Status Manual Tracking', 'Status_manual_tracking'])
 
-                business_critical = get_val(['Business Critical']) or ''
-                kpi = get_val(['KPI']) or ''
-                whitebox_category = get_val(['WhiteBox Category']) or ''
+                # 5. Booleans
+                kpi_text = get_val(['KPI'])
+                is_kpi = True if str(kpi_text).strip().lower() in ['yes', 'true', '1'] else False
+                
+                planned_ritm_text = get_val(['Planned with RITM', 'Planned_with_RITM'])
+                planned_with_ritm = True if str(planned_ritm_text).strip().lower() in ['yes', 'true', '1'] else False
+                
+                confirmed_market_text = get_val(['Confirmed by Market', 'Confirmed_by_Market'])
+                confirmed_by_market = True if str(confirmed_market_text).strip().lower() in ['yes', 'true', '1'] else False
 
+                # --- UPSERT 1: THE MASTER RAW ASSETS TABLE (All 49 Fields) ---
+                cursor.execute('''
+                    INSERT INTO raw_assets (
+                        inventory_id, legacy_id, name, managing_organization, hosting_location, type, status, stage, 
+                        business_critical, confidentiality_rating, integrity_rating, availability_rating, internet_facing, 
+                        iaas_paas_saas, master_record, number, stage_ritm, short_description, requested_for, opened_by, 
+                        company, created, name_of_application, url_of_application, estimated_date_pentest, opened, state, 
+                        assignment_group, assigned_to, closed, closed_by, close_notes, service_type, market, kpi, 
+                        date_first_seen, pentest_queue, gost_service, whitebox_category, quarter_planned, year_planned, 
+                        planned_with_ritm, month_planned, week_planned, tested_2024_ritm, tested_2025_ritm, prevision_2027, 
+                        confirmed_by_market, status_manual_tracking
+                    ) VALUES (
+                        %s, COALESCE(NULLIF(%s, ''), '0')::integer, %s, %s, %s, %s, %s, %s, 
+                        NULLIF(%s, '')::integer, NULLIF(%s, '')::integer, NULLIF(%s, '')::integer, NULLIF(%s, '')::integer, %s, 
+                        %s, %s, %s, %s, %s, %s, %s, 
+                        %s, NULLIF(%s, '')::timestamp, %s, %s, NULLIF(%s, '')::date, NULLIF(%s, '')::timestamp, %s, 
+                        %s, %s, NULLIF(%s, '')::timestamp, %s, %s, %s, %s, %s, 
+                        CURRENT_DATE, TRUE, %s, %s, %s, %s, 
+                        %s, %s, %s, %s, %s, %s, 
+                        %s, %s
+                    ) ON CONFLICT (inventory_id, legacy_id, number) DO UPDATE SET 
+                        name=EXCLUDED.name, managing_organization=EXCLUDED.managing_organization, hosting_location=EXCLUDED.hosting_location, 
+                        type=EXCLUDED.type, status=EXCLUDED.status, stage=EXCLUDED.stage, business_critical=EXCLUDED.business_critical, 
+                        confidentiality_rating=EXCLUDED.confidentiality_rating, integrity_rating=EXCLUDED.integrity_rating, 
+                        availability_rating=EXCLUDED.availability_rating, internet_facing=EXCLUDED.internet_facing, 
+                        iaas_paas_saas=EXCLUDED.iaas_paas_saas, master_record=EXCLUDED.master_record, stage_ritm=EXCLUDED.stage_ritm, 
+                        short_description=EXCLUDED.short_description, requested_for=EXCLUDED.requested_for, opened_by=EXCLUDED.opened_by, 
+                        company=EXCLUDED.company, created=EXCLUDED.created, name_of_application=EXCLUDED.name_of_application, 
+                        url_of_application=EXCLUDED.url_of_application, estimated_date_pentest=EXCLUDED.estimated_date_pentest, 
+                        opened=EXCLUDED.opened, state=EXCLUDED.state, assignment_group=EXCLUDED.assignment_group, 
+                        assigned_to=EXCLUDED.assigned_to, closed=EXCLUDED.closed, closed_by=EXCLUDED.closed_by, 
+                        close_notes=EXCLUDED.close_notes, service_type=EXCLUDED.service_type, market=EXCLUDED.market, 
+                        kpi=EXCLUDED.kpi, gost_service=EXCLUDED.gost_service, whitebox_category=EXCLUDED.whitebox_category, 
+                        quarter_planned=EXCLUDED.quarter_planned, year_planned=EXCLUDED.year_planned, planned_with_ritm=EXCLUDED.planned_with_ritm, 
+                        month_planned=EXCLUDED.month_planned, week_planned=EXCLUDED.week_planned, tested_2024_ritm=EXCLUDED.tested_2024_ritm, 
+                        tested_2025_ritm=EXCLUDED.tested_2025_ritm, prevision_2027=EXCLUDED.prevision_2027, 
+                        confirmed_by_market=EXCLUDED.confirmed_by_market, status_manual_tracking=EXCLUDED.status_manual_tracking,
+                        last_synced_at=CURRENT_TIMESTAMP;
+                ''', (
+                    safe_inv_id, safe_ext_id, name, managing_org, hosting_loc, type_val, status_val, stage_val,
+                    business_critical, confidentiality, integrity, availability, internet_facing,
+                    iaas_paas_saas, master_record, safe_number, stage_ritm, short_desc, requested_for, opened_by,
+                    company, created_val, app_name, app_url, est_date, opened_val, state_val,
+                    assignment_group, assigned_to, closed_val, closed_by, close_notes, service_type, market, is_kpi,
+                    gost_service, whitebox_category, quarter_planned, year_planned,
+                    planned_with_ritm, month_planned, week_planned, tested_2024, tested_2025, prev_2027,
+                    confirmed_by_market, status_manual
+                ))
+
+                # --- UPSERT 2: THE LIGHTWEIGHT UI TABLE (assets) ---
                 cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
-                            (inv_id, ext_id, number))
+                               (safe_inv_id, safe_ext_id, safe_number))
                 if cursor.fetchone():
                     cursor.execute(
                         "UPDATE assets SET name=%s, market=%s, gost_service=%s, business_critical=%s, kpi=%s, whitebox_category=%s WHERE inventory_id=%s AND ext_id=%s AND number=%s",
-                        (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
+                        (name, market, gost_service, business_critical, kpi_text, whitebox_category, safe_inv_id, safe_ext_id, safe_number))
                 else:
                     cursor.execute(
                         "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)",
-                        (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi,
-                        whitebox_category))
+                        (str(uuid.uuid4()), safe_inv_id, safe_ext_id, safe_number, name, market, gost_service, business_critical, kpi_text, whitebox_category))
 
         except Exception as e:
             print(f"Background Import Failed: {e}")
