@@ -181,8 +181,8 @@ def process_excel_background(contents: bytes):
                         planned_with_ritm, month_planned, week_planned, tested_2024_ritm, tested_2025_ritm, prevision_2027, 
                         confirmed_by_market, status_manual_tracking
                     ) VALUES (
-                        %s, COALESCE(NULLIF(%s, ''), '0')::integer, %s, %s, %s, %s, %s, %s, 
-                        NULLIF(%s, '')::integer, NULLIF(%s, '')::integer, NULLIF(%s, '')::integer, NULLIF(%s, '')::integer, %s, 
+                        %s, COALESCE(NULLIF(%s, ''), '0')::numeric::integer, %s, %s, %s, %s, %s, %s, 
+                        NULLIF(%s, '')::numeric::integer, NULLIF(%s, '')::numeric::integer, NULLIF(%s, '')::numeric::integer, NULLIF(%s, '')::numeric::integer, %s, 
                         %s, %s, %s, %s, %s, %s, %s, 
                         %s, NULLIF(%s, '')::timestamp, %s, %s, NULLIF(%s, '')::date, NULLIF(%s, '')::timestamp, %s, 
                         %s, %s, NULLIF(%s, '')::timestamp, %s, %s, %s, %s, %s, 
@@ -305,7 +305,7 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
         LEFT JOIN tests t ON ta.test_id = t.id
         WHERE ra.pentest_queue = TRUE 
-          AND ra.status_manual_tracking != '2027'
+          AND COALESCE(ra.status_manual_tracking, '') != '2027'
         ORDER BY t.start_year DESC, t.start_week DESC -- Brings the most recent test to the top
     ''')
 
