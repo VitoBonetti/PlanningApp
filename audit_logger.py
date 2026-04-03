@@ -70,7 +70,7 @@ def init_audit_log_infrastructure():
         print("Running locally: Skipping BigQuery Infrastructure Setup.")
         return
 
-    # 1. Create Dataset if not exists
+    # Create Dataset if not exists
     dataset_ref = f"{PROJECT_ID}.{DATASET_ID}"
     dataset = bigquery.Dataset(dataset_ref)
     dataset.location = LOCATION
@@ -80,7 +80,7 @@ def init_audit_log_infrastructure():
     except Exception as e:
         print(f"Failed to create dataset: {e}")
 
-    # 2. Define the Schema
+    # Define the Schema
     schema = [
         bigquery.SchemaField("timestamp", "TIMESTAMP", mode="REQUIRED"),
         bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
@@ -91,7 +91,7 @@ def init_audit_log_infrastructure():
         bigquery.SchemaField("details", "STRING", mode="NULLABLE"),
     ]
 
-    # 3. Create Table if not exists
+    # Create Table if not exists
     table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
     table = bigquery.Table(table_ref, schema=schema)
 

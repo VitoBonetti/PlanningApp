@@ -51,6 +51,7 @@ def get_system_status():
             cursor.close()
             conn.close()
 
+
 @router.get("/system/audit")
 def get_audit_logs():
     """Returns the most recent system audit logs from BigQuery."""
@@ -80,6 +81,7 @@ def generate_setup_totp(request: Request):
         "totp_secret": secret,
         "qr_code": f"data:image/svg+xml;base64,{qr_base64}"
     }
+
 
 @router.post("/system/setup")
 @limiter.limit("3/minute")

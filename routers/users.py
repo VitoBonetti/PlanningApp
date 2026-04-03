@@ -81,6 +81,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
     )
     return {"message": "User deleted from system."}
 
+
 @router.put("/users/{user_id}")
 def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks, 
                 current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
@@ -105,10 +106,12 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks,
     )
     return {"message": "User updated."}
 
+
 @router.get("/users/me")
 def get_my_profile(current_user: dict = Depends(get_current_user)):
     # This is what the React app calls on load to identify the user
     return current_user
+
 
 @router.get("/users/me/notifications")
 def get_my_notifications(current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
@@ -121,6 +124,7 @@ def get_my_notifications(current_user: dict = Depends(get_current_user), cursor 
     
     notifs = [{"id": r[0], "message": r[1], "type": r[2], "created_at": r[3]} for r in cursor.fetchall()]
     return notifs
+
 
 @router.put("/users/me/notifications/read")
 def mark_notifications_read(current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):

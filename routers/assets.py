@@ -162,23 +162,7 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the asset inventory.")
 
-    cursor.execute("""
-        SELECT COUNT(*) FROM assets a
-        JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
-        WHERE ra.pentest_queue = TRUE 
-          AND ra.status_manual_tracking != '2027'
-    """)
-    total = cursor.fetchone()[0] or 0
-    cursor.execute("""
-        SELECT COUNT(*) FROM assets a
-        JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
-        WHERE a.is_assigned = TRUE 
-          AND ra.pentest_queue = TRUE 
-          AND ra.status_manual_tracking != '2027'
-    """)
-    assigned = cursor.fetchone()[0] or 0
-
-    # Fetch the new columns from the DB
+    # Fetch the assets 
     cursor.execute('''
         SELECT a.id,
                a.inventory_id,
@@ -200,11 +184,22 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
         LEFT JOIN tests t ON ta.test_id = t.id
         WHERE ra.pentest_queue = TRUE 
           AND (ra.status_manual_tracking IS NULL OR ra.status_manual_tracking != '2027')
+        ORDER BY t.start_year DESC, t.start_week DESC -- Brings the most recent test to the top
     ''')
 
     assets = []
+    seen_ids = set() # We will use this to strictly prevent duplicate rows
+
     for r in cursor.fetchall():
-        # Handle the boolean KPI so React doesn't render it as invisible
+        asset_id = r[0]
+        
+        # If we have already added this asset to the table, skip it!
+        if asset_id in seen_ids:
+            continue
+            
+        seen_ids.add(asset_id)
+
+        # Handle the boolean KPI safely
         kpi_display = ''
         if r[12] is True:
             kpi_display = 'Yes'
@@ -212,7 +207,7 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
             kpi_display = 'No'
 
         assets.append({
-            "id": r[0], 
+            "id": asset_id, 
             "inventory_id": r[1], 
             "ext_id": r[2], 
             "number": r[3],
@@ -228,7 +223,15 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
             "whitebox_category": r[13] or ''
         })
 
-    return {"assets": assets, "total": total, "assigned": assigned}
+    # calculate the EXACT numbers based on the deduplicated list
+    total_count = len(assets)
+    assigned_count = sum(1 for a in assets if a["is_assigned"])
+
+    return {
+        "assets": assets, 
+        "total": total_count, 
+        "assigned": assigned_count
+    }
 
 
 @router.post("/assets/migrate-legacy-sheet")
@@ -561,14 +564,14 @@ def update_asset_tracking(
 
 
 # Temp function to bring back to live the Adv Sim test.
-@router.post("/assets/resurrect-ghosts")
-def resurrect_ghost_assets(cursor=Depends(get_db_cursor)):
-    # This finds all assets that are missing from raw_assets and copies them over!
-    cursor.execute('''
-        INSERT INTO raw_assets (inventory_id, legacy_id, number, name, market, gost_service, pentest_queue)
-        SELECT a.inventory_id, COALESCE(NULLIF(a.ext_id, ''), '0')::integer, a.number, a.name, a.market, a.gost_service, TRUE
-        FROM assets a
-        LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
-        WHERE ra.inventory_id IS NULL;
-    ''')
-    return {"message": "Ghost assets resurrected!"}
+# @router.post("/assets/resurrect-ghosts")
+# def resurrect_ghost_assets(cursor=Depends(get_db_cursor)):
+#     # This finds all assets that are missing from raw_assets and copies them over!
+#     cursor.execute('''
+#         INSERT INTO raw_assets (inventory_id, legacy_id, number, name, market, gost_service, pentest_queue)
+#         SELECT a.inventory_id, COALESCE(NULLIF(a.ext_id, ''), '0')::integer, a.number, a.name, a.market, a.gost_service, TRUE
+#         FROM assets a
+#         LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
+#         WHERE ra.inventory_id IS NULL;
+#     ''')
+#     return {"message": "Ghost assets resurrected!"}

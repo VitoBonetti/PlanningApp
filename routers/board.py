@@ -77,6 +77,7 @@ def calculate_weekly_capacity(user_id, year, week_number):
         return 0.0
     return round(provision, 1)
 
+
 @router.post("/events/")
 def create_event(e: EventCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_write_access)):
     # 1. PENTESTER RULES: Force their own ID, block system-wide events
@@ -184,6 +185,7 @@ def delete_event(event_id: str, request: Request, background_tasks: BackgroundTa
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Holiday deleted"}
 
+
 @router.get("/board/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(get_current_user)):
     weeks = list(get_quarter_weeks(quarter))
@@ -270,6 +272,7 @@ def wipe_system(request: Request, background_tasks: BackgroundTasks, current_use
     cursor.execute('DELETE FROM test_assets')
     cursor.execute('DELETE FROM tests')
     cursor.execute('DELETE FROM assets')
+    cursor.execute('DELETE FROM raw_assets')
     # cursor.execute('DELETE FROM events')  # Temporary comment out
 
     conn.commit()

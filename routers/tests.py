@@ -21,9 +21,6 @@ def log_test_history(cursor, test_id: str, action: str, user_id: str, username: 
     )
 
 
-import uuid
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
-
 @router.post("/tests/")
 def create_test(
     t: TestCreate, 

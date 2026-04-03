@@ -7,9 +7,8 @@ from googleapiclient.discovery import build
 import requests
 from datetime import datetime
 import uuid
-
-# Adjust this import to wherever your database connection logic lives!
 from database import db_cursor_context 
+
 
 # ==========================================
 # SECTION 1: CONFIGURATION (Kept Exactly as Yours)
@@ -62,6 +61,7 @@ class Config:
     MARKET_LOOKUP = {org: code for code, orgs in MARKET_MAPPING.items() for org in orgs}
     # WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw0q988Alpc8jkiWa2wedfB3tWzXCAnMYL28zvVL9fltufKI69X0EPgZCqTaWoi5bfk/exec"
 
+
 # ==========================================
 # SECTION 2 & 3: GOOGLE DRIVE & DATA BLENDING
 # ==========================================
@@ -95,6 +95,7 @@ class GoogleServices:
             print(f"Error reading {sheet_id}: {e}")
             return None
 
+
 class DataProcessor:
     @staticmethod
     def process_assets(df):
@@ -120,6 +121,7 @@ class DataProcessor:
         df_pentest['ID'] = df_pentest['ID'].astype(str).str.strip()
         merged = pd.merge(df_assets, df_pentest, on='ID', how='left')
         return merged.fillna('')
+
 
 # ==========================================
 # SECTION 4: THE NEW DATABASE SYNC
@@ -213,6 +215,7 @@ def sync_to_database(df):
                 print(f"Row Error on {safe_inv_id}: {e}")
                 
     print(f"✅ Successfully synced {success_count} assets to the database.")
+
 
 # THE MAIN TRIGGER FUNCTION
 def run_import_job():

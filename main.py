@@ -57,6 +57,7 @@ app.include_router(assets.router, prefix="/api")
 app.include_router(tests.router, prefix="/api")
 app.include_router(board.router, prefix="/api")
 
+
 # Websocket route
 @app.websocket("/ws/board")
 @app.websocket("/api/ws/board")
