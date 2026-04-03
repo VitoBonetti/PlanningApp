@@ -152,8 +152,7 @@ def sync_to_database(df):
             safe_number = number if number else "UNASSIGNED"
             safe_ext_id = ext_id if ext_id else '0' # Handles the 0 vs "" issue safely
 
-            # THE MAGIC SQL: Notice how the ON CONFLICT DO UPDATE SET block 
-            # completely ignores the 13 manual fields like 'quarter_planned' and 'status_manual_tracking'!
+            # ON CONFLICT DO UPDATE SET block completely ignores the 13 manual fields like 'quarter_planned' and 'status_manual_tracking'
             try:
                 cursor.execute('''
                     INSERT INTO raw_assets (
@@ -165,7 +164,8 @@ def sync_to_database(df):
                         last_synced_at
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, '')::int, NULLIF(%s, '')::int, NULLIF(%s, '')::int, NULLIF(%s, '')::int, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-                        NULLIF(%s, '')::timestamp, %s, %s, NULLIF(%s, '')::date, NULLIF(%s, '')::timestamp, %s, %s, %s, NULLIF(%s, '')::timestamp, %s, %s, %s, %s, NULLIF(%s, '')::date, CURRENT_TIMESTAMP
+                        NULLIF(%s, '')::timestamp, %s, %s, NULLIF(%s, '')::date, NULLIF(%s, '')::timestamp, %s, %s, %s, NULLIF(%s, '')::timestamp, %s, %s, %s, %s, 
+                        COALESCE(NULLIF(%s, '')::date, CURRENT_DATE), CURRENT_TIMESTAMP
                     ) ON CONFLICT (inventory_id, legacy_id, number) DO UPDATE SET 
                         name=EXCLUDED.name, managing_organization=EXCLUDED.managing_organization,
                         hosting_location=EXCLUDED.hosting_location, type=EXCLUDED.type, status=EXCLUDED.status, stage=EXCLUDED.stage,
@@ -177,7 +177,7 @@ def sync_to_database(df):
                         name_of_application=EXCLUDED.name_of_application, url_of_application=EXCLUDED.url_of_application, estimated_date_pentest=EXCLUDED.estimated_date_pentest, 
                         opened=EXCLUDED.opened, state=EXCLUDED.state, assignment_group=EXCLUDED.assignment_group, assigned_to=EXCLUDED.assigned_to,
                         closed=EXCLUDED.closed, closed_by=EXCLUDED.closed_by, close_notes=EXCLUDED.close_notes, service_type=EXCLUDED.service_type,
-                        market=EXCLUDED.market, date_first_seen=EXCLUDED.date_first_seen,
+                        market=EXCLUDED.market, 
                         last_synced_at=CURRENT_TIMESTAMP;
                 ''', (
                     safe_inv_id, safe_ext_id, get_val(['Name']), get_val(['Managing Organization']), 
@@ -187,7 +187,7 @@ def sync_to_database(df):
                     safe_number, get_val(['Stage_RITM']), get_val(['Short description']), 
                     get_val(['Requested for']), get_val(['Opened by']), get_val(['Company']), 
                     get_val(['Created']), get_val(['Name of the application']), get_val(['URL of the application']), 
-                    get_val(['estimated date']), get_val(['Opened']), get_val(['State']), get_val(['Assignment group']), 
+                    get_val(['Please provide an estimated date on when you want the pentest to start']), get_val(['Opened']), get_val(['State']), get_val(['Assignment group']), 
                     get_val(['Assigned to']), get_val(['Closed']), get_val(['Closed by']), get_val(['Close notes']), 
                     get_val(['Service Type']), get_val(['Market']), get_val(['Date First Seen'])
                 ))
