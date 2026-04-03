@@ -685,6 +685,100 @@ def update_asset_tracking(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Fetch Last Sync Date
+@router.get("/assets/last-sync")
+def get_last_sync(cursor=Depends(get_db_cursor)):
+    try:
+        cursor.execute("SELECT MAX(last_synced_at) FROM raw_assets")
+        result = cursor.fetchone()[0]
+        if result:
+            # Format it nicely for the frontend (e.g., "YYYY-MM-DD HH:MM:SS")
+            formatted_date = result.strftime("%Y-%m-%d %H:%M:%S")
+            return {"last_sync": formatted_date}
+        return {"last_sync": "Never"}
+    except Exception as e:
+        print(f"Error fetching last sync: {e}")
+        return {"last_sync": "Unknown"}
+
+
+@router.post("/assets/manual")
+def create_manual_asset(
+    payload: dict, 
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_admin),
+    cursor=Depends(get_db_cursor)
+):
+    try:
+        # Automated Fields
+        inv_id = f"MANUAL_{uuid.uuid4().hex[:8]}"
+        number = payload.get('number') or f"TCKT_{uuid.uuid4().hex[:6]}"
+        
+        # Helper to convert empty strings to None for strict Postgres columns (Integers, Dates, Timestamps)
+        def clean_val(val):
+            return None if val == "" else val
+
+        # 1. Insert into Master Table (raw_assets) handling all 49 insertable fields
+        cursor.execute('''
+            INSERT INTO raw_assets (
+                inventory_id, legacy_id, name, managing_organization, hosting_location, type, status, stage, 
+                business_critical, confidentiality_rating, integrity_rating, availability_rating, internet_facing, 
+                iaas_paas_saas, master_record, number, stage_ritm, short_description, requested_for, opened_by, 
+                company, created, name_of_application, url_of_application, estimated_date_pentest, opened, state, 
+                assignment_group, assigned_to, closed, closed_by, close_notes, service_type, market, kpi, 
+                date_first_seen, pentest_queue, gost_service, whitebox_category, quarter_planned, year_planned, 
+                planned_with_ritm, month_planned, week_planned, tested_2024_ritm, tested_2025_ritm, prevision_2027, 
+                confirmed_by_market, status_manual_tracking
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s, %s, %s, %s, 
+                CURRENT_DATE, %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s, %s, 
+                %s, %s
+            )
+        ''', (
+            inv_id, clean_val(payload.get('legacy_id')), payload.get('name', 'New Manual Asset'), 
+            payload.get('managing_organization'), payload.get('hosting_location'), payload.get('type'), 
+            payload.get('status'), payload.get('stage'), clean_val(payload.get('business_critical')), 
+            clean_val(payload.get('confidentiality_rating')), clean_val(payload.get('integrity_rating')), 
+            clean_val(payload.get('availability_rating')), payload.get('internet_facing'), 
+            payload.get('iaas_paas_saas'), payload.get('master_record'), number, payload.get('stage_ritm'), 
+            payload.get('short_description'), payload.get('requested_for'), payload.get('opened_by'), 
+            payload.get('company'), clean_val(payload.get('created')), payload.get('name_of_application'), 
+            payload.get('url_of_application'), clean_val(payload.get('estimated_date_pentest')), 
+            clean_val(payload.get('opened')), payload.get('state'), payload.get('assignment_group'), 
+            payload.get('assigned_to'), clean_val(payload.get('closed')), payload.get('closed_by'), 
+            payload.get('close_notes'), payload.get('service_type'), payload.get('market', 'Global'), 
+            payload.get('kpi', False), payload.get('pentest_queue', True), 
+            payload.get('gost_service', 'Adversary / Manual'), payload.get('whitebox_category'), 
+            payload.get('quarter_planned'), payload.get('year_planned'), payload.get('planned_with_ritm', False), 
+            payload.get('month_planned'), payload.get('week_planned'), payload.get('tested_2024_ritm'), 
+            payload.get('tested_2025_ritm'), payload.get('prevision_2027'), payload.get('confirmed_by_market', False), 
+            payload.get('status_manual_tracking', 'Not Planned')
+        ))
+
+        # 2. Conditional Insert into UI Table (assets) based on your Golden Rules
+        if payload.get('pentest_queue', True) is True and payload.get('status_manual_tracking') != '2027':
+            cursor.execute('''
+                INSERT INTO assets (
+                    id, inventory_id, ext_id, number, name, market, gost_service, whitebox_category, is_assigned
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+            ''', (
+                str(uuid.uuid4()), inv_id, str(payload.get('legacy_id', 0)), number, 
+                payload.get('name', 'New Manual Asset'), payload.get('market', 'Global'), 
+                payload.get('gost_service', 'Adversary / Manual'), payload.get('whitebox_category', '')
+            ))
+
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+        return {"message": "Asset created successfully!"}
+
+    except Exception as e:
+        print(f"Manual Creation Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Temp function to bring back to live the Adv Sim test.
 # @router.post("/assets/resurrect-ghosts")
 # def resurrect_ghost_assets(cursor=Depends(get_db_cursor)):
