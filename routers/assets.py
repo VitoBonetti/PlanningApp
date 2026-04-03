@@ -396,7 +396,7 @@ def get_asset_test_history(
         return []
 
 
-@router.put("/assets/{inventory_id}/{number}/tracking")
+@router.put("/assets/tracking")
 def update_asset_tracking(
     inventory_id: str, 
     number: str, 
