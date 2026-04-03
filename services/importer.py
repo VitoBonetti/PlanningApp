@@ -142,6 +142,17 @@ def sync_to_database(df):
                         if val and val.lower() != 'nan': return val
                 return ''
 
+            def get_estimated_date():
+                for col in df.columns:
+                    # If the column header contains these words ANYWHERE inside it, grab the data!
+                    if 'estimated date' in str(col).lower():
+                        val = str(row[col]).strip().lstrip("'")
+                        if val and val.lower() != 'nan': 
+                            # Print it to the console so we can visually confirm it's working
+                            print(f"✅ Found Date for {ext_id}: {val} (from column: '{col}')")
+                            return val
+                return ''
+
             inv_id = get_val(['Inventory Id'])
             ext_id = get_val(['ID'])
             number = get_val(['Number'])
@@ -188,7 +199,7 @@ def sync_to_database(df):
                     safe_number, get_val(['Stage_RITM']), get_val(['Short description']), 
                     get_val(['Requested for']), get_val(['Opened by']), get_val(['Company']), 
                     get_val(['Created']), get_val(['Name of the application']), get_val(['URL of the application']), 
-                    get_val(['Please provide an estimated date on when you want the pentest to start']), get_val(['Opened']), get_val(['State']), get_val(['Assignment group']), 
+                    get_estimated_date(), get_val(['Opened']), get_val(['State']), get_val(['Assignment group']), 
                     get_val(['Assigned to']), get_val(['Closed']), get_val(['Closed by']), get_val(['Close notes']), 
                     get_val(['Service Type']), get_val(['Market']), get_val(['Date First Seen'])
                 ))
