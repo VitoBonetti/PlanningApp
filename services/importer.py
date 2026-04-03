@@ -134,6 +134,9 @@ def sync_to_database(df):
     print(f"Syncing {len(df)} records directly to PostgreSQL...")
     success_count = 0
     
+    # 1. Record the exact time the sync started to identify missing assets later
+    sync_start_time = datetime.now()
+    
     with db_cursor_context() as cursor:
         for index, row in df.iterrows():
             def get_val(possible_names):
@@ -150,8 +153,6 @@ def sync_to_database(df):
                     if 'estimated date' in str(col).lower():
                         val = str(row[col]).strip().lstrip("'")
                         if val and val.lower() != 'nan': 
-                            # Print it to the console so we can visually confirm it's working
-                            print(f"✅ Found Date for {ext_id}: {val} (from column: '{col}')")
                             return val
                 return ''
 
@@ -214,6 +215,41 @@ def sync_to_database(df):
             except Exception as e:
                 print(f"Row Error on {safe_inv_id}: {e}")
                 
+        # ---------------------------------------------------------
+        # Auto-purge assets that OneTrust decommissioned
+        # ---------------------------------------------------------
+        try:
+            # 1. Delete test links for orphaned assets
+            cursor.execute('''
+                DELETE FROM test_assets 
+                WHERE asset_id IN (
+                    SELECT a.id FROM assets a
+                    JOIN raw_assets ra ON a.inventory_id = ra.inventory_id
+                    WHERE ra.legacy_id != 0 AND ra.last_synced_at < %s
+                )
+            ''', (sync_start_time,))
+
+            # 2. Delete the UI assets
+            cursor.execute('''
+                DELETE FROM assets 
+                WHERE inventory_id IN (
+                    SELECT inventory_id FROM raw_assets 
+                    WHERE legacy_id != 0 AND last_synced_at < %s
+                )
+            ''', (sync_start_time,))
+
+            # 3. Delete the Master Records
+            cursor.execute('''
+                DELETE FROM raw_assets 
+                WHERE legacy_id != 0 AND last_synced_at < %s
+            ''', (sync_start_time,))
+            
+            deleted_count = cursor.rowcount
+            print(f"🧹 Auto-purged {deleted_count} decommissioned assets from the database.")
+            
+        except Exception as cleanup_error:
+            print(f"Cleanup Error: {cleanup_error}")
+            
     print(f"✅ Successfully synced {success_count} assets to the database.")
 
 
