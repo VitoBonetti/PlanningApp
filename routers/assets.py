@@ -397,6 +397,8 @@ def get_raw_assets(
     limit: int = Query(50, ge=1, le=500),
     search: Optional[str] = None,
     market: Optional[str] = None,
+    kpi_only: Optional[bool] = None,        
+    pentest_queue_only: Optional[bool] = None,
     current_user: dict = Depends(get_current_user), 
     cursor=Depends(get_db_cursor)
 ):
@@ -416,6 +418,11 @@ def get_raw_assets(
         if market:
             where_clauses.append("market ILIKE %s")
             params.append(f"%{market}%")
+
+        if kpi_only:
+            where_clauses.append("kpi = TRUE")
+        if pentest_queue_only:
+            where_clauses.append("pentest_queue = TRUE")
 
         where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
