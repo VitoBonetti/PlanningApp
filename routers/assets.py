@@ -11,6 +11,7 @@ from googleapiclient.discovery import build
 from datetime import datetime
 import os
 from models import AssetTrackingUpdate
+from services.importer import run_import_job
 
 router = APIRouter(tags=["Assets"])
 
@@ -200,9 +201,9 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
     return {"assets": assets, "total": total, "assigned": assigned}
 
 
-@router.post("/assets/sync-drive")
+@router.post("/assets/migrate-legacy-sheet")
 @limiter.limit("2/minute")
-def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
     GOOGLE_TAB_NAME = os.getenv('GOOGLE_TAB_NAME') 
 
@@ -338,16 +339,41 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
             log_audit_event,
             user_id=current_user["id"],
             username=current_user["username"],
-            action="SYNC_GOOGLE_DRIVE",
+            action="SYNC_LEGACY_SHEET",
             resource_type="ASSET_INVENTORY",
-            details=f"Synced {success_count} filtered assets from Google Drive to raw and planner tables."
+            details=f"Synced {success_count} filtered assets from Legacy Sheet to raw tables."
         )
 
-        return {"message": f"Successfully synced {success_count} filtered assets from Google Drive!"}
+        return {"message": f"Successfully migrated {success_count} assets from Legacy Sheet!"}
 
     except Exception as e:
         print(f"Drive Sync Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to sync from Drive: {str(e)}")
+
+
+@router.post("/assets/sync-drive")
+@limiter.limit("5/minute")
+def sync_assets_from_drive(
+    request: Request, 
+    background_tasks: BackgroundTasks, 
+    current_user: dict = Depends(require_admin)
+):
+    # Start the importer in the background
+    background_tasks.add_task(run_import_job)
+
+    # Tell the React UI to refresh itself automatically
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+    
+    background_tasks.add_task(
+        log_audit_event,
+        user_id=current_user["id"],
+        username=current_user["username"],
+        action="GOOGLE_DRIVE_SYNC",
+        resource_type="ASSET_INVENTORY",
+        details="Triggered the background Google Drive importer."
+    )
+
+    return {"message": "Google Drive Sync started in the background! The table will update automatically when finished."}
 
 
 @router.get("/assets/raw")
