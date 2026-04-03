@@ -16,10 +16,10 @@ from database import db_cursor_context
 # ==========================================
 class Config:
     SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    SHARED_DRIVE_ID = "0AMbjgBIOgwqiUk9PVA"
-    SOURCE_FOLDER_ID = "1KNQLkxV9JYW2vk1PD8OYJ4aED7bcyaWK"
-    ARCHIVE_FOLDER_ID = "1ZRFPjd5URC7YLBPuVmaYkDNhhs7N5bq-"
-
+    SHARED_DRIVE_ID = os.getenv('SHARED_DRIVE_ID')
+    SOURCE_FOLDER_ID = os.getenv('SOURCE_FOLDER_ID')
+    ARCHIVE_FOLDER_ID = os.getenv('ARCHIVE_FOLDER_ID')
+    
     S1_PATTERN = "Assets_"
     S1_TAB_NAME = "Asset Attributes"
 
@@ -60,7 +60,7 @@ class Config:
         "UK": ["United Kingdom", "Randstad UK"], "US": ["Celerity", "United States", "Randstad US", "Randstad North America, Inc."]
     }
     MARKET_LOOKUP = {org: code for code, orgs in MARKET_MAPPING.items() for org in orgs}
-    WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw0q988Alpc8jkiWa2wedfB3tWzXCAnMYL28zvVL9fltufKI69X0EPgZCqTaWoi5bfk/exec"
+    # WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw0q988Alpc8jkiWa2wedfB3tWzXCAnMYL28zvVL9fltufKI69X0EPgZCqTaWoi5bfk/exec"
 
 # ==========================================
 # SECTION 2 & 3: GOOGLE DRIVE & DATA BLENDING
