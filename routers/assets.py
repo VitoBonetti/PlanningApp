@@ -779,6 +779,50 @@ def create_manual_asset(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/assets/raw")
+def delete_raw_asset(
+    inventory_id: str, 
+    number: str, 
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_admin),
+    cursor=Depends(get_db_cursor)
+):
+    try:
+        # 1. Find the internal UI asset ID linked to this Master Record
+        cursor.execute("SELECT id FROM assets WHERE inventory_id = %s AND number = %s", (inventory_id, number))
+        asset_row = cursor.fetchone()
+
+        if asset_row:
+            ui_asset_id = asset_row[0]
+            # 2. Sever the connections! Remove it from any tests it was scheduled in.
+            cursor.execute("DELETE FROM test_assets WHERE asset_id = %s", (ui_asset_id,))
+            
+            # 3. Delete it from the UI Planner board
+            cursor.execute("DELETE FROM assets WHERE id = %s", (ui_asset_id,))
+
+        # 4. Delete the Master Record completely
+        cursor.execute("DELETE FROM raw_assets WHERE inventory_id = %s AND number = %s", (inventory_id, number))
+
+        # Broadcast the deletion so every user's screen updates instantly
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="DELETE_ASSET",
+            resource_type="ASSET",
+            details=f"Permanently deleted asset and severed all test links: {inventory_id} / {number}"
+        )
+
+        return {"message": "Asset completely purged from the system."}
+
+    except Exception as e:
+        print(f"Delete Asset Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+        
 # Temp function to bring back to live the Adv Sim test.
 # @router.post("/assets/resurrect-ghosts")
 # def resurrect_ghost_assets(cursor=Depends(get_db_cursor)):
