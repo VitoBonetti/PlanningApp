@@ -739,7 +739,7 @@ def create_manual_asset(
                 %s, %s
             )
         ''', (
-            inv_id, clean_val(payload.get('legacy_id')), payload.get('name', 'New Manual Asset'), 
+            inv_id, clean_val(payload.get('legacy_id') or 0), payload.get('name', 'New Manual Asset'), 
             payload.get('managing_organization'), payload.get('hosting_location'), payload.get('type'), 
             payload.get('status'), payload.get('stage'), clean_val(payload.get('business_critical')), 
             clean_val(payload.get('confidentiality_rating')), clean_val(payload.get('integrity_rating')), 
@@ -802,6 +802,8 @@ def delete_raw_asset(
 
         # 4. Delete the Master Record completely
         cursor.execute("DELETE FROM raw_assets WHERE inventory_id = %s AND number = %s", (inventory_id, number))
+
+        cursor.connection.commit()
 
         # Broadcast the deletion so every user's screen updates instantly
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
