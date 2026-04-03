@@ -305,7 +305,7 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
         LEFT JOIN tests t ON ta.test_id = t.id
         WHERE ra.pentest_queue = TRUE 
-          AND (ra.status_manual_tracking IS NULL OR ra.status_manual_tracking != '2027')
+          AND ra.status_manual_tracking != '2027'
         ORDER BY t.start_year DESC, t.start_week DESC -- Brings the most recent test to the top
     ''')
 
