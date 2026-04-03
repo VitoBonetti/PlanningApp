@@ -184,32 +184,47 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
                a.inventory_id,
                a.ext_id,
                a.number,
-               a.name,
-               a.market,
-               a.gost_service,
+               ra.name,
+               ra.market,
+               ra.gost_service,
                a.is_assigned,
                t.status,
                t.start_week,
                t.start_year,
-               a.business_critical,
-               a.kpi,
-               a.whitebox_category
+               ra.business_critical,
+               ra.kpi,
+               ra.whitebox_category
         FROM assets a
         JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
         LEFT JOIN tests t ON ta.test_id = t.id
         WHERE ra.pentest_queue = TRUE 
-          AND ra.status_manual_tracking != '2027'
+          AND (ra.status_manual_tracking IS NULL OR ra.status_manual_tracking != '2027')
     ''')
 
     assets = []
     for r in cursor.fetchall():
+        # Handle the boolean KPI so React doesn't render it as invisible
+        kpi_display = ''
+        if r[12] is True:
+            kpi_display = 'Yes'
+        elif r[12] is False:
+            kpi_display = 'No'
+
         assets.append({
-            "id": r[0], "inventory_id": r[1], "ext_id": r[2], "number": r[3],
-            "name": r[4], "market": r[5], "gost_service": r[6], "is_assigned": bool(r[7]),
-            "test_status": r[8], "start_week": r[9], "start_year": r[10],
-            "business_critical": r[11] or '',
-            "kpi": r[12] or '',
+            "id": r[0], 
+            "inventory_id": r[1], 
+            "ext_id": r[2], 
+            "number": r[3],
+            "name": r[4], 
+            "market": r[5], 
+            "gost_service": r[6], 
+            "is_assigned": bool(r[7]),
+            "test_status": r[8], 
+            "start_week": r[9], 
+            "start_year": r[10],
+            "business_critical": r[11] if r[11] is not None else '',
+            "kpi": kpi_display,
             "whitebox_category": r[13] or ''
         })
 
