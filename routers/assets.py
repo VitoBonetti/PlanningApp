@@ -474,17 +474,17 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
             kpi = get_val(['KPI']) or ''
             whitebox_category = get_val(['WhiteBox Category']) or ''
 
-            # We use your exact manual lookup using all 3 fields for the Planner UI table
+            # FIXED: Now using safe_inv_id, safe_ext_id, and safe_number to ensure the UI JOIN works!
             cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
-                           (inv_id, ext_id, number))
+                           (safe_inv_id, safe_ext_id, safe_number))
             if cursor.fetchone():
                 cursor.execute(
                     "UPDATE assets SET name=%s, market=%s, gost_service=%s, business_critical=%s, kpi=%s, whitebox_category=%s WHERE inventory_id=%s AND ext_id=%s AND number=%s",
-                    (name, market, gost_service, business_critical, kpi, whitebox_category, inv_id, ext_id, number))
+                    (name, market, gost_service, business_critical, kpi, whitebox_category, safe_inv_id, safe_ext_id, safe_number))
             else:
                 cursor.execute(
                     "INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)",
-                    (str(uuid.uuid4()), inv_id, ext_id, number, name, market, gost_service, business_critical, kpi, whitebox_category))
+                    (str(uuid.uuid4()), safe_inv_id, safe_ext_id, safe_number, name, market, gost_service, business_critical, kpi, whitebox_category))
 
             success_count += 1
 
