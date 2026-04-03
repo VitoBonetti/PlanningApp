@@ -10,7 +10,7 @@ import google.auth
 from googleapiclient.discovery import build
 from datetime import datetime
 import os
-
+from models import AssetTrackingUpdate
 
 router = APIRouter(tags=["Assets"])
 
@@ -394,3 +394,67 @@ def get_asset_test_history(
     except Exception as e:
         print(f"History Fetch Error: {e}")
         return []
+
+
+@router.put("/assets/{inventory_id}/{number}/tracking")
+def update_asset_tracking(
+    inventory_id: str, 
+    number: str, 
+    data: AssetTrackingUpdate, 
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_admin),
+    cursor=Depends(get_db_cursor)
+):
+    try:
+        # A. Update the massive raw_assets table with all 13 manual fields
+        cursor.execute("""
+            UPDATE raw_assets SET
+                pentest_queue = %s,
+                gost_service = %s,
+                whitebox_category = %s,
+                quarter_planned = %s,
+                year_planned = %s,
+                planned_with_ritm = %s,
+                month_planned = %s,
+                week_planned = %s,
+                tested_2024_ritm = %s,
+                tested_2025_ritm = %s,
+                prevision_2027 = %s,
+                confirmed_by_market = %s,
+                status_manual_tracking = %s
+            WHERE inventory_id = %s AND number = %s
+        """, (
+            data.pentest_queue, data.gost_service, data.whitebox_category,
+            data.quarter_planned, data.year_planned, data.planned_with_ritm,
+            data.month_planned, data.week_planned, data.tested_2024_ritm,
+            data.tested_2025_ritm, data.prevision_2027, data.confirmed_by_market,
+            data.status_manual_tracking, inventory_id, number
+        ))
+
+        # B. Also update the lean `assets` table used by the Planner UI so changes show instantly
+        cursor.execute("""
+            UPDATE assets SET 
+                gost_service = %s, 
+                whitebox_category = %s 
+            WHERE inventory_id = %s AND number = %s
+        """, (data.gost_service, data.whitebox_category, inventory_id, number))
+
+        # C. Audit & Broadcast
+        # Assuming you have `manager` and `log_audit_event` imported at the top of your file
+        # (which it looks like you do based on your import_assets route!)
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+        background_tasks.add_task(
+            log_audit_event,
+            user_id=current_user["id"],
+            username=current_user["username"],
+            action="UPDATE_ASSET_TRACKING",
+            resource_type="ASSET",
+            details=f"Updated manual tracking fields for {inventory_id} / {number}"
+        )
+
+        return {"message": "Tracking updated successfully"}
+
+    except Exception as e:
+        print(f"Update Tracking Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

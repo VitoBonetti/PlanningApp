@@ -135,3 +135,19 @@ class AssignmentCreate(BaseModel):
 
 class BulkTestCreate(BaseModel):
     asset_ids: List[str]
+
+
+class AssetTrackingUpdate(BaseModel):
+    pentest_queue: bool
+    gost_service: str
+    whitebox_category: str
+    quarter_planned: str
+    year_planned: str
+    planned_with_ritm: bool
+    month_planned: str
+    week_planned: str
+    tested_2024_ritm: str
+    tested_2025_ritm: str
+    prevision_2027: str
+    confirmed_by_market: bool
+    status_manual_tracking: str
