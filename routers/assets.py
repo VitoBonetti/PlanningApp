@@ -507,7 +507,7 @@ def update_asset_tracking(
     cursor=Depends(get_db_cursor)
 ):
     try:
-        # A. Update the massive raw_assets table with all 13 manual fields
+        # update the massive raw_assets table with all manual fields (Single Source of Truth)
         cursor.execute("""
             UPDATE raw_assets SET
                 pentest_queue = %s,
@@ -532,7 +532,7 @@ def update_asset_tracking(
             data.status_manual_tracking, inventory_id, number
         ))
 
-        # B. Also update the lean `assets` table used by the Planner UI so changes show instantly
+        # B. Also update the lean `assets` table just to prevent any UI edge cases
         cursor.execute("""
             UPDATE assets SET 
                 gost_service = %s, 
@@ -541,6 +541,7 @@ def update_asset_tracking(
         """, (data.gost_service, data.whitebox_category, inventory_id, number))
 
         
+        # C. Broadcast changes to React and log the audit event safely in the background
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
 
         background_tasks.add_task(
@@ -565,7 +566,7 @@ def resurrect_ghost_assets(cursor=Depends(get_db_cursor)):
     # This finds all assets that are missing from raw_assets and copies them over!
     cursor.execute('''
         INSERT INTO raw_assets (inventory_id, legacy_id, number, name, market, gost_service, pentest_queue)
-        SELECT a.inventory_id, a.ext_id, a.number, a.name, a.market, a.gost_service, TRUE
+        SELECT a.inventory_id, COALESCE(NULLIF(a.ext_id, ''), '0')::integer, a.number, a.name, a.market, a.gost_service, TRUE
         FROM assets a
         LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
         WHERE ra.inventory_id IS NULL;
