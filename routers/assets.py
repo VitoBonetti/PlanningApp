@@ -332,7 +332,8 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
 
             success_count += 1
 
-        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        
         background_tasks.add_task(
             log_audit_event,
             user_id=current_user["id"],
@@ -439,10 +440,9 @@ def update_asset_tracking(
             WHERE inventory_id = %s AND number = %s
         """, (data.gost_service, data.whitebox_category, inventory_id, number))
 
-        # C. Audit & Broadcast
-        # Assuming you have `manager` and `log_audit_event` imported at the top of your file
-        # (which it looks like you do based on your import_assets route!)
+        
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+
         background_tasks.add_task(
             log_audit_event,
             user_id=current_user["id"],
