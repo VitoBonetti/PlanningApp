@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     # Schedule it for 2:00 AM every day
     # You can easily test it by changing it to (trigger='interval', minutes=5)
     # scheduler.add_job(scheduled_sync_job, 'cron', hour=2, minute=0)
-    scheduler.add_job(scheduled_sync_job, 'interval', minutes=15)
+    scheduler.add_job(scheduled_sync_job, 'interval', minutes=2)
     
     scheduler.start()
     print("🕰️ Internal Background Scheduler started.")
