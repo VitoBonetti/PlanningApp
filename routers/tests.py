@@ -104,13 +104,13 @@ def create_test(
         # We stamp it with today's date so it doesn't cause errors in your Looker Dashboard
         cursor.execute('''
             INSERT INTO raw_assets (inventory_id, legacy_id, number, name, pentest_queue, gost_service, date_first_seen, status_manual_tracking)
-            VALUES (%s, '0', %s, %s, TRUE, 'Adversary / Manual', CURRENT_DATE, 'Not Planned')
+            VALUES (%s, '0', %s, %s, TRUE, 'Adversary Simulation', CURRENT_DATE, 'Not Planned')
         ''', (inv_id, number, asset_name))
         
         # 2. Insert into the UI Table (assets)
         cursor.execute('''
             INSERT INTO assets (id, inventory_id, ext_id, number, name, market, gost_service, is_assigned)
-            VALUES (%s, %s, '0', %s, %s, 'Global', 'Adversary / Manual', TRUE)
+            VALUES (%s, %s, '0', %s, %s, 'Global', 'Adversary Simulation', TRUE)
         ''', (asset_id, inv_id, number, asset_name))
         
         # 3. Link it to the newly created test!

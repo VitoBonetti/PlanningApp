@@ -794,10 +794,21 @@ def delete_raw_asset(
 
         if asset_row:
             ui_asset_id = asset_row[0]
-            # 2. Sever the connections! Remove it from any tests it was scheduled in.
-            cursor.execute("DELETE FROM test_assets WHERE asset_id = %s", (ui_asset_id,))
             
-            # 3. Delete it from the UI Planner board
+            
+            # Find any tests that were linked to this specific asset
+            cursor.execute("SELECT test_id FROM test_assets WHERE asset_id = %s", (ui_asset_id,))
+            linked_tests = cursor.fetchall()
+            
+            # Annihilate the tests, their team assignments, and their history
+            for (test_id,) in linked_tests:
+                cursor.execute("DELETE FROM assignments WHERE test_id = %s", (test_id,))
+                cursor.execute("DELETE FROM test_history WHERE test_id = %s", (test_id,))
+                cursor.execute("DELETE FROM test_assets WHERE test_id = %s", (test_id,))
+                cursor.execute("DELETE FROM tests WHERE id = %s", (test_id,))
+            
+
+            # 3. Delete the asset from the UI Planner board
             cursor.execute("DELETE FROM assets WHERE id = %s", (ui_asset_id,))
 
         # 4. Delete the Master Record completely
