@@ -82,7 +82,43 @@ class GoogleServices:
         files = results.get('files', [])
         if not files: return None
         files.sort(key=lambda x: x['createdTime'] if sort_method == 'createdTime' else x['name'], reverse=True)
-        return files[0]['id']
+
+        latest_file_id = files[0]['id']
+
+        # --- NEW: Archive all the older duplicate files! ---
+        if len(files) > 1:
+            for old_file in files[1:]:
+                old_id = old_file['id']
+                old_name = old_file['name']
+                new_name = f"zArchived_{old_name}"
+                print(f"Archiving older file: {old_name}")
+                
+                try:
+                    # Primary Attempt: Move to Archive folder AND rename
+                    self.drive_service.files().update(
+                        fileId=old_id,
+                        addParents=Config.ARCHIVE_FOLDER_ID,
+                        removeParents=Config.SOURCE_FOLDER_ID,
+                        body={'name': new_name},
+                        supportsAllDrives=True
+                    ).execute()
+                    print(f"Successfully moved and renamed to {new_name}")
+                    
+                except Exception as move_err:
+                    print(f"Failed to move {old_name} to archive folder. Trying fallback rename. Error: {move_err}")
+                    try:
+                        # Fallback Attempt: Just rename it in place so it gets ignored next time
+                        self.drive_service.files().update(
+                            fileId=old_id,
+                            body={'name': new_name},
+                            supportsAllDrives=True
+                        ).execute()
+                        print(f"Fallback successful. Renamed to {new_name} in current folder.")
+                    except Exception as rename_err:
+                        print(f"Total failure archiving {old_name}: {rename_err}")
+
+        return latest_file_id
+        
 
     def read_sheet(self, sheet_id, tab_identifier):
         try:
