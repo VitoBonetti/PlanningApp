@@ -187,7 +187,7 @@ def delete_event(event_id: str, request: Request, background_tasks: BackgroundTa
 
 
 @router.get("/board/{year}/Q{quarter}")
-def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(get_current_user)):
+def get_quarterly_board(year: int, quarter: int, response: Response, current_user: dict = Depends(get_current_user)):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
