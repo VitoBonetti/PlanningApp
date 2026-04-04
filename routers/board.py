@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request, Response
 import uuid
 from datetime import datetime, timedelta
 from database import get_db_connection
@@ -188,6 +188,9 @@ def delete_event(event_id: str, request: Request, background_tasks: BackgroundTa
 
 @router.get("/board/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, current_user: dict = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     weeks = list(get_quarter_weeks(quarter))
     conn = get_db_connection()
     cursor = conn.cursor()

@@ -12,12 +12,6 @@ from audit_logger import log_audit_event
 router = APIRouter(tags=["Tests & Assignments"])
 
 
-async def delayed_refresh():
-    """Waits 0.5 seconds for the DB to commit, then tells all UI's to refresh."""
-    await asyncio.sleep(0.5)
-    await manager.broadcast('{"action": "REFRESH_BOARD"}')
-
-
 def sync_raw_assets_tracking(cursor, test_id: str, action: str, start_week: int = None, start_year: int = None):
     """Synchronizes the test's status directly to the master raw_assets table based on 8 specific rules."""
     
@@ -125,7 +119,7 @@ def create_test(
     # Logging and Background Tasks
     log_test_history(cursor, new_id, "CREATED", current_user["id"], current_user["username"])
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}') # Good idea to refresh the asset list too!
 
     background_tasks.add_task(
@@ -189,7 +183,7 @@ def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: B
 
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids)
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
         log_audit_event,
@@ -213,7 +207,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
     log_test_history(cursor, test_id, f"SCHEDULED", current_user["id"], current_user["username"], schedule.start_week, schedule.start_year)
     
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
         log_audit_event,
@@ -255,7 +249,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
 
     log_test_history(cursor, test_id, "DELETE_TEST", current_user["id"], current_user["username"])
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
         log_audit_event,
@@ -292,7 +286,7 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
         log_audit_event,
@@ -321,7 +315,7 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
         'UPDATE tests SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, status=COALESCE(%s, status), whitebox_category=%s WHERE id=%s',
         (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
         log_audit_event,
@@ -345,7 +339,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user:
 
     log_test_history(cursor, test_id, "COMPLETED", current_user["id"], current_user["username"])
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
         log_audit_event,
@@ -385,7 +379,7 @@ def duplicate_test(test_id: str, background_tasks: BackgroundTasks, current_user
     for (asset_id,) in assets:
         cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, asset_id))
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
         log_audit_event,
@@ -436,7 +430,7 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks, current_us
     log_test_history(cursor, tombstone_id, "TOMBSTONE_CREATED_ON_BOARD", current_user["id"], current_user["username"], start_week, start_year)
 
     # 7. Instant UI Refresh FIRST!
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     # 8. Silent Audit Log
     background_tasks.add_task(
@@ -480,7 +474,7 @@ def revert_test_complete(test_id: str, background_tasks: BackgroundTasks, curren
     cursor.execute("UPDATE tests SET status = 'Planned' WHERE id = %s", (test_id,))
     
     log_test_history(cursor, test_id, "REVERTED_COMPLETION", current_user["id"], current_user["username"])
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test reverted to Planned."}
 
 
@@ -512,7 +506,7 @@ def revert_test_unable(tombstone_id: str, background_tasks: BackgroundTasks, cur
     # 4. Now it is safe to delete the Tombstone itself
     cursor.execute('DELETE FROM tests WHERE id = %s', (tombstone_id,))
 
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unable status reverted."}
 
 
@@ -574,7 +568,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
                        (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
         log_audit_event,
@@ -601,7 +595,7 @@ def remove_assignment(test_id: str, user_id: str, request: Request, background_t
                        (notif_id, user_id, f"You were removed from {test_row[0]}.", "REMOVAL"))
     cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
     
-    background_tasks.add_task(delayed_refresh)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
         log_audit_event,
