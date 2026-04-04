@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 
 @app.on_event("startup")

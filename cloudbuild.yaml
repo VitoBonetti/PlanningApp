@@ -32,6 +32,9 @@ steps:
       - 'gcp-vpc-subnet'
       - '--vpc-egress'
       - 'private-ranges-only'
+      - '--no-cpu-throttling'
+      - '--min-instances'
+      - '1'
       - '--set-env-vars'
       - 'GCP_PROJECT_ID=$PROJECT_ID,LOCATION=europe-west1,DB_INSTANCE_NAME=gost-db,DATASET_ID=gcp_audit_logs,TABLE_ID=security_events,SECRET_ID=system-config,POSTGRES_DB=gost-db,IAM_SA_EMAIL=gcp-backend-sa@gostcontrolpanel.iam,ALLOWED_ORIGINS=https://gcp.vitobonetti.nl,MASTER_ADMIN_EMAIL=vito.bonetti@randstadgroep.nl,GOOGLE_SHEET_ID=1uTk6wxHcvnOLVd_1W_iwKAltelfP-mz6TlbQnXWvAi0,GOOGLE_TAB_NAME=Applications,SHARED_DRIVE_ID=0AMbjgBIOgwqiUk9PVA,SOURCE_FOLDER_ID=1KNQLkxV9JYW2vk1PD8OYJ4aED7bcyaWK,ARCHIVE_FOLDER_ID=1ZRFPjd5URC7YLBPuVmaYkDNhhs7N5bq'
 
