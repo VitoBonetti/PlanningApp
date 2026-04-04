@@ -11,6 +11,56 @@ from audit_logger import log_audit_event
 router = APIRouter(tags=["Tests & Assignments"])
 
 
+def sync_raw_assets_tracking(cursor, test_id: str, action: str, start_week: int = None, start_year: int = None):
+    """Synchronizes the test's status directly to the master raw_assets table based on 8 specific rules."""
+    
+    # 1. Find the master inventory_id(s) linked to this test
+    cursor.execute('''
+        SELECT a.inventory_id 
+        FROM assets a
+        JOIN test_assets ta ON a.id = ta.asset_id
+        WHERE ta.test_id = %s
+    ''', (test_id,))
+    assets = cursor.fetchall()
+    
+    if not assets:
+        return
+    
+    # Format for SQL IN clause safely
+    inventory_ids = tuple([a[0] for a in assets])
+    if len(inventory_ids) == 1:
+        inventory_ids = (inventory_ids[0],)
+        
+    # RULES 3 & 8: SCHEDULED or MOVED
+    if action == "SCHEDULED":
+        # Calculate the Quarter (Q1, Q2, Q3, Q4) based on the week number
+        q = 1 if start_week <= 13 else (2 if start_week <= 26 else (3 if start_week <= 39 else 4))
+        
+        cursor.execute('''
+            UPDATE raw_assets 
+            SET quarter_planned = %s, year_planned = %s, week_planned = %s, 
+                status_manual_tracking = 'Planned'
+            WHERE inventory_id IN %s
+        ''', (f"Q{q}", str(start_year), str(start_week), inventory_ids))
+
+    # RULES 4, 6, & 7: UNSCHEDULED, UNABLE, or DELETED
+    elif action in ["UNSCHEDULED", "UNABLE", "DELETED"]:
+        cursor.execute('''
+            UPDATE raw_assets 
+            SET quarter_planned = NULL, year_planned = NULL, week_planned = NULL, 
+                status_manual_tracking = 'Not Planned'
+            WHERE inventory_id IN %s
+        ''', (inventory_ids,))
+
+    # RULE 5: COMPLETED
+    elif action == "COMPLETED":
+        cursor.execute('''
+            UPDATE raw_assets 
+            SET status_manual_tracking = 'Completed'
+            WHERE inventory_id IN %s
+        ''', (inventory_ids,))
+
+
 def log_test_history(cursor, test_id: str, action: str, user_id: str, username: str, week_number: int = None, year: int = None):
     """Inserts a state-change record into the test_history table."""
     history_id = str(uuid.uuid4())
@@ -153,6 +203,8 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 
     cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s', (schedule.start_week, schedule.start_year, "Planned", test_id))
 
+    sync_raw_assets_tracking(cursor, test_id, "SCHEDULED", schedule.start_week, schedule.start_year)
+
     log_test_history(cursor, test_id, f"SCHEDULED", current_user["id"], current_user["username"], schedule.start_week, schedule.start_year)
     
     
@@ -194,6 +246,8 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
     cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
                    ("Not Planned", test_id,))
 
+    sync_raw_assets_tracking(cursor, test_id, "UNSCHEDULED")
+
     log_test_history(cursor, test_id, "DELETE_TEST", current_user["id"], current_user["username"])
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
@@ -220,6 +274,8 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
     # 1. NEW: Find all assets attached to this test and free them!
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
     linked_assets = cursor.fetchall()
+
+    sync_raw_assets_tracking(cursor, test_id, "DELETED")
     
     for (asset_id,) in linked_assets:
         cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (asset_id,))
@@ -279,6 +335,8 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
 def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
     cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = %s", (test_id,))
+
+    sync_raw_assets_tracking(cursor, test_id, "COMPLETED")
 
     log_test_history(cursor, test_id, "COMPLETED", current_user["id"], current_user["username"])
     
@@ -365,6 +423,8 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks, current_us
 
     # 5. Send the ORIGINAL test back to the Backlog! (Preserves the exact UUID)
     cursor.execute("UPDATE tests SET start_week = NULL, start_year = NULL, status = 'Not Planned' WHERE id = %s", (test_id,))
+
+    sync_raw_assets_tracking(cursor, test_id, "UNABLE")
 
     # 6. Log the state changes in our new history table!
     log_test_history(cursor, test_id, "MARKED_UNABLE (Returned to Backlog)", current_user["id"], current_user["username"])
