@@ -26,10 +26,8 @@ def sync_raw_assets_tracking(cursor, test_id: str, action: str, start_week: int 
     if not assets:
         return
     
-    # Format for SQL IN clause safely
-    inventory_ids = tuple([a[0] for a in assets])
-    if len(inventory_ids) == 1:
-        inventory_ids = (inventory_ids[0],)
+    # 2. Extract into a standard Python list
+    inventory_ids = [a[0] for a in assets]
         
     # RULES 3 & 8: SCHEDULED or MOVED
     if action == "SCHEDULED":
@@ -40,7 +38,7 @@ def sync_raw_assets_tracking(cursor, test_id: str, action: str, start_week: int 
             UPDATE raw_assets 
             SET quarter_planned = %s, year_planned = %s, week_planned = %s, 
                 status_manual_tracking = 'Planned'
-            WHERE inventory_id IN %s
+            WHERE inventory_id = ANY(%s)
         ''', (f"Q{q}", str(start_year), str(start_week), inventory_ids))
 
     # RULES 4, 6, & 7: UNSCHEDULED, UNABLE, or DELETED
@@ -49,7 +47,7 @@ def sync_raw_assets_tracking(cursor, test_id: str, action: str, start_week: int 
             UPDATE raw_assets 
             SET quarter_planned = NULL, year_planned = NULL, week_planned = NULL, 
                 status_manual_tracking = 'Not Planned'
-            WHERE inventory_id IN %s
+            WHERE inventory_id = ANY(%s)
         ''', (inventory_ids,))
 
     # RULE 5: COMPLETED
@@ -57,7 +55,7 @@ def sync_raw_assets_tracking(cursor, test_id: str, action: str, start_week: int 
         cursor.execute('''
             UPDATE raw_assets 
             SET status_manual_tracking = 'Completed'
-            WHERE inventory_id IN %s
+            WHERE inventory_id = ANY(%s)
         ''', (inventory_ids,))
 
 
