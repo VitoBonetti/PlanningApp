@@ -205,7 +205,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
     sync_raw_assets_tracking(cursor, test_id, "SCHEDULED", schedule.start_week, schedule.start_year)
 
     log_test_history(cursor, test_id, f"SCHEDULED", current_user["id"], current_user["username"], schedule.start_week, schedule.start_year)
-    
+    cursor.connection.commit()
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
@@ -248,6 +248,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
     sync_raw_assets_tracking(cursor, test_id, "UNSCHEDULED")
 
     log_test_history(cursor, test_id, "DELETE_TEST", current_user["id"], current_user["username"])
+    cursor.connection.commit()
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
@@ -285,7 +286,8 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
     # 3. ORIGINAL: Delete assignments and the test itself
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
-    
+    cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
@@ -314,7 +316,8 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
     cursor.execute(
         'UPDATE tests SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, status=COALESCE(%s, status), whitebox_category=%s WHERE id=%s',
         (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
-    
+    cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
@@ -338,7 +341,8 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks, current_user:
     sync_raw_assets_tracking(cursor, test_id, "COMPLETED")
 
     log_test_history(cursor, test_id, "COMPLETED", current_user["id"], current_user["username"])
-    
+    cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
@@ -429,6 +433,8 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks, current_us
     log_test_history(cursor, test_id, "MARKED_UNABLE (Returned to Backlog)", current_user["id"], current_user["username"])
     log_test_history(cursor, tombstone_id, "TOMBSTONE_CREATED_ON_BOARD", current_user["id"], current_user["username"], start_week, start_year)
 
+    cursor.connection.commit()
+
     # 7. Instant UI Refresh FIRST!
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
@@ -474,6 +480,8 @@ def revert_test_complete(test_id: str, background_tasks: BackgroundTasks, curren
     cursor.execute("UPDATE tests SET status = 'Planned' WHERE id = %s", (test_id,))
     
     log_test_history(cursor, test_id, "REVERTED_COMPLETION", current_user["id"], current_user["username"])
+    cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test reverted to Planned."}
 
@@ -505,6 +513,8 @@ def revert_test_unable(tombstone_id: str, background_tasks: BackgroundTasks, cur
     
     # 4. Now it is safe to delete the Tombstone itself
     cursor.execute('DELETE FROM tests WHERE id = %s', (tombstone_id,))
+
+    cursor.connection.commit()
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Unable status reverted."}
@@ -567,6 +577,8 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
         cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
                        (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
+
+    cursor.connection.commit()
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
@@ -594,6 +606,7 @@ def remove_assignment(test_id: str, user_id: str, request: Request, background_t
         cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
                        (notif_id, user_id, f"You were removed from {test_row[0]}.", "REMOVAL"))
     cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
+    cursor.connection.commit()
     
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
