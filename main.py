@@ -2,9 +2,48 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from routers import auth, users, assets, tests, board
 from websockets_manager import manager
+from services.importer import run_import_job
 from database import get_db_connection, init_db, db_cursor_context
 from audit_logger import init_audit_log_infrastructure
 import os
+from contextlib import asynccontextmanager
+import asyncio
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+
+async def scheduled_sync_job():
+    print("⏰ Running automated daily sync job...")
+    
+    # Run the heavy, synchronous Google Drive/DB sync in a separate thread 
+    # so it doesn't freeze the WebSockets for everyone else!
+    await asyncio.to_thread(run_import_job)
+    
+    # Give the database a second to settle, then broadcast to all connected UIs
+    await asyncio.sleep(2)
+    await manager.broadcast('{"action": "REFRESH_ASSETS"}')
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+    print("✅ Automated daily sync complete and broadcasted.")
+
+
+# --- 2. Attach the Scheduler to the App Lifespan ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start the clock when the server spins up
+    scheduler = AsyncIOScheduler()
+    
+    # Schedule it for 2:00 AM every day
+    # You can easily test it by changing it to (trigger='interval', minutes=5)
+    # scheduler.add_job(scheduled_sync_job, 'cron', hour=2, minute=0)
+    scheduler.add_job(scheduled_sync_job, 'interval', minutes=15)
+    
+    scheduler.start()
+    print("🕰️ Internal Background Scheduler started.")
+    
+    yield # The app runs here
+    
+    # Shut down the clock cleanly when the server restarts
+    scheduler.shutdown()
+
 
 app = FastAPI()
 
