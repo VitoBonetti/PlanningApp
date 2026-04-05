@@ -503,12 +503,12 @@ def get_asset_test_history(
         columns = [col[0] for col in cursor.description]
         tests = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-        # 2. Grab the assignments safely using PostgreSQL ANY() array syntax
+        # 2. Grab the exact weeks they are assigned to
         if tests:
             test_ids = [t["id"] for t in tests]
             
             cursor.execute("""
-                SELECT a.test_id, a.user_id, u.name as user_name, u.base_capacity
+                SELECT a.test_id, a.user_id, u.name as user_name, u.base_capacity, a.week_number, u.location
                 FROM assignments a
                 JOIN users u ON a.user_id = u.id
                 WHERE a.test_id = ANY(%s)
@@ -517,30 +517,23 @@ def get_asset_test_history(
             assignments_raw = cursor.fetchall()
             
             for test in tests:
-                test_assigns = [row for row in assignments_raw if row[0] == test["id"]]
-                
-                user_totals = {}
-                for row in test_assigns:
-                    user_id = row[1]
-                    user_name = row[2]
-                    # Safely grab capacity (fallback to 1.0 if not defined)
-                    base_cap = float(row[3]) if row[3] is not None else 1.0
-                    
-                    if user_id not in user_totals:
-                        user_totals[user_id] = {"user_name": user_name, "allocated_credits": 0}
-                    
-                    # Add their weekly capacity for each week they are assigned
-                    user_totals[user_id]["allocated_credits"] += base_cap
-
-                test["assignments"] = list(user_totals.values())
+                # We send the RAW weeks to React, so React can do the PTO math!
+                test["raw_assignments"] = []
+                for row in assignments_raw:
+                    if row[0] == test["id"]:
+                        test["raw_assignments"].append({
+                            "user_id": row[1],
+                            "user_name": row[2],
+                            "base_capacity": float(row[3]) if row[3] is not None else 1.0,
+                            "week_number": int(row[4]) if row[4] is not None else test["start_week"],
+                            "location": row[5] or "Global"
+                        })
 
         return tests
     except Exception as e:
-        # DO NOT FAIL SILENTLY. Print the error to the console!
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Database Error: {str(e)}")
-
 
 @router.put("/assets/tracking")
 def update_asset_tracking(inventory_id: str, number: str, data: AssetTrackingUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
