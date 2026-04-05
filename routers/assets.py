@@ -35,10 +35,8 @@ def parse_date(val):
         return None
     val = str(val).strip()
     try:
-        # Matches: "2026-01-19"
         return datetime.strptime(val, "%Y-%m-%d").date()
     except ValueError:
-        # Fallback just in case a timestamp accidentally snuck into a date column
         try:
             return datetime.strptime(val, "%Y-%m-%d %H:%M:%S").date()
         except ValueError:
@@ -50,20 +48,12 @@ def parse_timestamp(val):
         return None
     val = str(val).strip()
     try:
-        # Matches: "2025-12-11 21:53:40"
         return datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
     except ValueError:
-        # Fallback just in case the time is missing
         try:
             return datetime.strptime(val, "%Y-%m-%d")
         except ValueError:
             return None
-
-
-# Excel Parser
-import pandas as pd
-import io
-import uuid
 
 
 def process_excel_background(contents: bytes):
@@ -83,7 +73,6 @@ def process_excel_background(contents: bytes):
             df = df.fillna('')
 
             for index, row in df.iterrows():
-                # Extract clean values, stripping Excel formatting artifacts
                 def get_val(possible_names):
                     for col in df.columns:
                         if str(col).strip().lower() in [n.lower() for n in possible_names]:
@@ -91,7 +80,6 @@ def process_excel_background(contents: bytes):
                             if val and val.lower() != 'nan': return val
                     return ''
 
-                # Specific fuzzy matcher for that long ServiceNow Date header
                 def get_estimated_date():
                     for col in df.columns:
                         if 'estimated date' in str(col).lower():
@@ -99,7 +87,6 @@ def process_excel_background(contents: bytes):
                             if val and val.lower() != 'nan': return val
                     return ''
 
-                # 1. Primary Keys
                 inv_id = get_val(['Inventory Id'])
                 ext_id = get_val(['ID'])
                 number = get_val(['Number'])
@@ -110,7 +97,6 @@ def process_excel_background(contents: bytes):
                 safe_ext_id = ext_id or "0"
                 safe_number = number or f"TCKT_{uuid.uuid4().hex[:6]}"
 
-                # 2. Extract General Info
                 name = get_val(['Name']) or 'Unknown Asset'
                 managing_org = get_val(['Managing Organization'])
                 hosting_loc = get_val(['Hosting Location'])
@@ -127,7 +113,6 @@ def process_excel_background(contents: bytes):
                 iaas_paas_saas = get_val(['IaaS, PaaS, SaaS', 'IaaS / PaaS / SaaS'])
                 master_record = get_val(['Master Record'])
                 
-                # 3. ServiceNow Ticketing Info
                 stage_ritm = get_val(['Stage_RITM', 'Stage RITM'])
                 short_desc = get_val(['Short description'])
                 requested_for = get_val(['Requested for'])
@@ -146,7 +131,6 @@ def process_excel_background(contents: bytes):
                 close_notes = get_val(['Close notes'])
                 service_type = get_val(['Service Type'])
                 
-                # 4. Custom Gost/Tracking Info
                 market = get_val(['Market']) or 'Global'
                 gost_service = get_val(['Gost_service', 'Gost Service']) or 'Adversary / Manual'
                 whitebox_category = get_val(['WhiteBox Category', 'Whitebox Category'])
@@ -159,7 +143,6 @@ def process_excel_background(contents: bytes):
                 prev_2027 = get_val(['Prevision 2027', 'Prevision_2027'])
                 status_manual = get_val(['Status Manual Tracking', 'Status_manual_tracking'])
 
-                # 5. Booleans
                 kpi_text = get_val(['KPI'])
                 is_kpi = True if str(kpi_text).strip().lower() in ['yes', 'true', '1'] else False
                 
@@ -169,7 +152,6 @@ def process_excel_background(contents: bytes):
                 confirmed_market_text = get_val(['Confirmed by Market', 'Confirmed_by_Market'])
                 confirmed_by_market = True if str(confirmed_market_text).strip().lower() in ['yes', 'true', '1'] else False
 
-                # --- UPSERT 1: THE MASTER RAW ASSETS TABLE (All 49 Fields) ---
                 cursor.execute('''
                     INSERT INTO raw_assets (
                         inventory_id, legacy_id, name, managing_organization, hosting_location, type, status, stage, 
@@ -218,7 +200,6 @@ def process_excel_background(contents: bytes):
                     confirmed_by_market, status_manual
                 ))
 
-                # --- UPSERT 2: THE LIGHTWEIGHT UI TABLE (assets) ---
                 cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
                                (safe_inv_id, safe_ext_id, safe_number))
                 if cursor.fetchone():
@@ -240,32 +221,22 @@ async def import_assets(request: Request, background_tasks: BackgroundTasks, fil
                         current_user: dict = Depends(require_admin)):
 
     contents = await file.read()
-
-    # block files larger than 5MB
-    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+    MAX_FILE_SIZE = 5 * 1024 * 1024
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 5MB.")
 
-    # magic Number Validation (File Signature)
-    # .xls (OLE2) signature: D0 CF 11 E0 A1 B1 1A E1
-    # .xlsx (ZIP) signature: 50 4B 03 04
     XLS_MAGIC = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
     XLSX_MAGIC = b'\x50\x4b\x03\x04'
 
     is_valid_signature = contents.startswith(XLS_MAGIC) or contents.startswith(XLSX_MAGIC)
 
     if not is_valid_signature:
-        raise HTTPException(
-            status_code=400,
-            detail="Security Alert: Invalid file signature. This is not a genuine Excel file."
-        )
+        raise HTTPException(status_code=400, detail="Security Alert: Invalid file signature.")
 
-    # fallback Extension Check
     if not file.filename.endswith(('.xls', '.xlsx')):
         raise HTTPException(status_code=400, detail="Invalid extension. Please use .xls or .xlsx")
 
     background_tasks.add_task(process_excel_background, contents)
-
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
     background_tasks.add_task(
@@ -284,76 +255,42 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the asset inventory.")
 
-    # Fetch the assets 
     cursor.execute('''
-        SELECT a.id,
-               a.inventory_id,
-               a.ext_id,
-               a.number,
-               ra.name,
-               ra.market,
-               ra.gost_service,
-               a.is_assigned,
-               t.status,
-               t.start_week,
-               t.start_year,
-               ra.business_critical,
-               ra.kpi,
-               ra.whitebox_category
+        SELECT a.id, a.inventory_id, a.ext_id, a.number, ra.name, ra.market, ra.gost_service,
+               a.is_assigned, t.status, t.start_week, t.start_year, ra.business_critical, ra.kpi, ra.whitebox_category
         FROM assets a
         JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
         LEFT JOIN tests t ON ta.test_id = t.id
         WHERE ra.pentest_queue = TRUE 
           AND COALESCE(ra.status_manual_tracking, '') != '2027'
-        ORDER BY t.start_year DESC, t.start_week DESC -- Brings the most recent test to the top
+        ORDER BY t.start_year DESC, t.start_week DESC
     ''')
 
     assets = []
-    seen_ids = set() # We will use this to strictly prevent duplicate rows
+    seen_ids = set()
 
     for r in cursor.fetchall():
         asset_id = r[0]
-        
-        # If we have already added this asset to the table, skip it!
-        if asset_id in seen_ids:
-            continue
-            
+        if asset_id in seen_ids: continue
         seen_ids.add(asset_id)
 
-        # Handle the boolean KPI safely
         kpi_display = ''
-        if r[12] is True:
-            kpi_display = 'Yes'
-        elif r[12] is False:
-            kpi_display = 'No'
+        if r[12] is True: kpi_display = 'Yes'
+        elif r[12] is False: kpi_display = 'No'
 
         assets.append({
-            "id": asset_id, 
-            "inventory_id": r[1], 
-            "ext_id": r[2], 
-            "number": r[3],
-            "name": r[4], 
-            "market": r[5], 
-            "gost_service": r[6], 
-            "is_assigned": bool(r[7]),
-            "test_status": r[8], 
-            "start_week": r[9], 
-            "start_year": r[10],
+            "id": asset_id, "inventory_id": r[1], "ext_id": r[2], "number": r[3],
+            "name": r[4], "market": r[5], "gost_service": r[6], "is_assigned": bool(r[7]),
+            "test_status": r[8], "start_week": r[9], "start_year": r[10],
             "business_critical": r[11] if r[11] is not None else '',
-            "kpi": kpi_display,
-            "whitebox_category": r[13] or ''
+            "kpi": kpi_display, "whitebox_category": r[13] or ''
         })
 
-    # calculate the EXACT numbers based on the deduplicated list
     total_count = len(assets)
     assigned_count = sum(1 for a in assets if a["is_assigned"])
 
-    return {
-        "assets": assets, 
-        "total": total_count, 
-        "assigned": assigned_count
-    }
+    return {"assets": assets, "total": total_count, "assigned": assigned_count}
 
 
 @router.post("/assets/migrate-legacy-sheet")
@@ -363,7 +300,6 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
     GOOGLE_TAB_NAME = os.getenv('GOOGLE_TAB_NAME') 
 
     try:
-        # 1. Fetch from Google Sheets
         credentials, project = google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
         service = build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
@@ -373,12 +309,10 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
         if not values:
             raise HTTPException(status_code=404, detail="No data found in the Google Sheet.")
 
-        # 2. Convert directly to your Pandas DataFrame!
         headers = values[0]
         rows = values[1:]
         df = pd.DataFrame(rows, columns=headers)
         
-        # 3. Apply your exact filtering logic to drop the 4,700 junk rows instantly
         df.columns = df.columns.str.strip()
         if 'Pentest Queue' in df.columns:
             df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
@@ -388,7 +322,6 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
 
         success_count = 0
 
-        # 4. Iterate through only the remaining ~300 valid rows
         for index, row in df.iterrows():
             def get_val(possible_names):
                 for col in df.columns:
@@ -397,22 +330,16 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
                         if val and val.lower() != 'nan': return val
                 return ''
 
-            # Extract Primary Keys
             inv_id = get_val(['Inventory Id'])
             ext_id = get_val(['ID'])
             number = get_val(['Number'])
             
-            if not inv_id and not ext_id and not number: 
-                continue
+            if not inv_id and not ext_id and not number: continue
                 
-            # Failsafe for composite primary key requirements in raw_assets
             safe_inv_id = inv_id if inv_id else f"SYS_GEN_{uuid.uuid4().hex[:8]}"
             safe_number = number if number else "UNASSIGNED"
             safe_ext_id = parse_int(ext_id) or 0
 
-            # ---------------------------------------------------------
-            # TABLE 1: UPSERT INTO RAW_ASSETS
-            # ---------------------------------------------------------
             cursor.execute('''
                 INSERT INTO raw_assets (
                     inventory_id, legacy_id, name, managing_organization, hosting_location, type, status, stage, 
@@ -464,9 +391,6 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
                 parse_bool(get_val(['Confirmed by market'])), get_val(['Status_manual_tracking'])
             ))
 
-            # ---------------------------------------------------------
-            # TABLE 2: YOUR ORIGINAL PLANNER ASSETS LOGIC
-            # ---------------------------------------------------------
             name = get_val(['Name']) or 'Unknown Asset'
             market = get_val(['Market']) or 'Global'
             gost_service = get_val(['Gost_service']) or 'Unknown'
@@ -474,7 +398,6 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
             kpi = get_val(['KPI']) or ''
             whitebox_category = get_val(['WhiteBox Category']) or ''
 
-            # FIXED: Now using safe_inv_id, safe_ext_id, and safe_number to ensure the UI JOIN works!
             cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND ext_id=%s AND number=%s",
                            (safe_inv_id, safe_ext_id, safe_number))
             if cursor.fetchone():
@@ -489,14 +412,9 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
             success_count += 1
 
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-        
         background_tasks.add_task(
-            log_audit_event,
-            user_id=current_user["id"],
-            username=current_user["username"],
-            action="SYNC_LEGACY_SHEET",
-            resource_type="ASSET_INVENTORY",
-            details=f"Synced {success_count} filtered assets from Legacy Sheet to raw tables."
+            log_audit_event, user_id=current_user["id"], username=current_user["username"], action="SYNC_LEGACY_SHEET",
+            resource_type="ASSET_INVENTORY", details=f"Synced {success_count} filtered assets."
         )
 
         return {"message": f"Successfully migrated {success_count} assets from Legacy Sheet!"}
@@ -508,41 +426,22 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
 
 @router.post("/assets/sync-drive")
 @limiter.limit("5/minute")
-def sync_assets_from_drive(
-    request: Request, 
-    background_tasks: BackgroundTasks, 
-    current_user: dict = Depends(require_admin)
-):
-    # Start the importer in the background
+def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     background_tasks.add_task(run_import_job)
-
-    # Tell the React UI to refresh itself automatically
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-    
     background_tasks.add_task(
-        log_audit_event,
-        user_id=current_user["id"],
-        username=current_user["username"],
-        action="GOOGLE_DRIVE_SYNC",
-        resource_type="ASSET_INVENTORY",
-        details="Triggered the background Google Drive importer."
+        log_audit_event, user_id=current_user["id"], username=current_user["username"], action="GOOGLE_DRIVE_SYNC",
+        resource_type="ASSET_INVENTORY", details="Triggered the background Google Drive importer."
     )
-
-    return {"message": "Google Drive Sync started in the background! The table will update automatically when finished."}
+    return {"message": "Google Drive Sync started in the background!"}
 
 
 @router.get("/assets/raw")
 def get_raw_assets(
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=500),
-    search: Optional[str] = None,
-    market: Optional[str] = None,
-    kpi_only: Optional[bool] = None,        
-    pentest_queue_only: Optional[bool] = None,
-    current_user: dict = Depends(get_current_user), 
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=500), search: Optional[str] = None, market: Optional[str] = None,
+    kpi_only: Optional[bool] = None, pentest_queue_only: Optional[bool] = None, current_user: dict = Depends(get_current_user), 
     cursor=Depends(get_db_cursor)
 ):
-    # Security Check
     if current_user.get("role") == "pentester":
         raise HTTPException(status_code=403, detail="Not authorized to view raw corporate data.")
 
@@ -551,7 +450,6 @@ def get_raw_assets(
         params = []
         where_clauses = []
 
-        # Dynamic Filtering
         if search:
             where_clauses.append("(name ILIKE %s OR inventory_id ILIKE %s OR number ILIKE %s)")
             params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
@@ -566,27 +464,17 @@ def get_raw_assets(
 
         where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
-        # 1. Get the total count for the frontend pagination math
-        count_query = f"SELECT COUNT(*) FROM raw_assets {where_str}"
-        cursor.execute(count_query, tuple(params))
+        cursor.execute(f"SELECT COUNT(*) FROM raw_assets {where_str}", tuple(params))
         total_items = cursor.fetchone()[0]
 
-        # 2. Get the specific page of data
-        data_query = f"SELECT * FROM raw_assets {where_str} ORDER BY name ASC LIMIT %s OFFSET %s"
-        cursor.execute(data_query, tuple(params + [limit, offset]))
+        cursor.execute(f"SELECT * FROM raw_assets {where_str} ORDER BY name ASC LIMIT %s OFFSET %s", tuple(params + [limit, offset]))
         
         columns = [col[0] for col in cursor.description]
         raw_assets = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
-        # Return the payload in a paginated wrapper!
         return {
             "data": raw_assets,
-            "pagination": {
-                "total": total_items,
-                "page": page,
-                "limit": limit,
-                "pages": (total_items + limit - 1) // limit
-            }
+            "pagination": { "total": total_items, "page": page, "limit": limit, "pages": (total_items + limit - 1) // limit }
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -640,7 +528,6 @@ def get_asset_test_history(
                     user_name = row[2]
                     week_num = row[3]
                     
-                    # Fetch capacity for that week
                     from routers.board import get_user_provision_internal
                     credits = get_user_provision_internal(cursor, user_id, test["start_year"], week_num)
                     
@@ -657,60 +544,27 @@ def get_asset_test_history(
 
 
 @router.put("/assets/tracking")
-def update_asset_tracking(
-    inventory_id: str, 
-    number: str, 
-    data: AssetTrackingUpdate, 
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_admin),
-    cursor=Depends(get_db_cursor)
-):
+def update_asset_tracking(inventory_id: str, number: str, data: AssetTrackingUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     try:
-        # update the massive raw_assets table with all manual fields (Single Source of Truth)
         cursor.execute("""
             UPDATE raw_assets SET
-                pentest_queue = %s,
-                gost_service = %s,
-                whitebox_category = %s,
-                quarter_planned = %s,
-                year_planned = %s,
-                planned_with_ritm = %s,
-                month_planned = %s,
-                week_planned = %s,
-                tested_2024_ritm = %s,
-                tested_2025_ritm = %s,
-                prevision_2027 = %s,
-                confirmed_by_market = %s,
+                pentest_queue = %s, gost_service = %s, whitebox_category = %s, quarter_planned = %s,
+                year_planned = %s, planned_with_ritm = %s, month_planned = %s, week_planned = %s,
+                tested_2024_ritm = %s, tested_2025_ritm = %s, prevision_2027 = %s, confirmed_by_market = %s,
                 status_manual_tracking = %s
             WHERE inventory_id = %s AND number = %s
         """, (
-            data.pentest_queue, data.gost_service, data.whitebox_category,
-            data.quarter_planned, data.year_planned, data.planned_with_ritm,
-            data.month_planned, data.week_planned, data.tested_2024_ritm,
-            data.tested_2025_ritm, data.prevision_2027, data.confirmed_by_market,
+            data.pentest_queue, data.gost_service, data.whitebox_category, data.quarter_planned, data.year_planned, data.planned_with_ritm,
+            data.month_planned, data.week_planned, data.tested_2024_ritm, data.tested_2025_ritm, data.prevision_2027, data.confirmed_by_market,
             data.status_manual_tracking, inventory_id, number
         ))
 
-        # B. Also update the lean `assets` table just to prevent any UI edge cases
         cursor.execute("""
-            UPDATE assets SET 
-                gost_service = %s, 
-                whitebox_category = %s 
-            WHERE inventory_id = %s AND number = %s
+            UPDATE assets SET gost_service = %s, whitebox_category = %s WHERE inventory_id = %s AND number = %s
         """, (data.gost_service, data.whitebox_category, inventory_id, number))
 
-        
-        # C. Broadcast changes to React and log the audit event safely in the background
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-
-        background_tasks.add_task(
-            log_audit_event,
-            user_id=current_user["id"],
-            username=current_user["username"],
-            action="UPDATE_ASSET_TRACKING",
-            resource_type="ASSET",
-            details=f"Updated manual tracking fields for {inventory_id} / {number}"
-        )
+        background_tasks.add_task(log_audit_event, user_id=current_user["id"], username=current_user["username"], action="UPDATE_ASSET_TRACKING", resource_type="ASSET", details=f"Updated manual tracking fields for {inventory_id} / {number}")
 
         return {"message": "Tracking updated successfully"}
 
@@ -719,39 +573,28 @@ def update_asset_tracking(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Fetch Last Sync Date
 @router.get("/assets/last-sync")
 def get_last_sync(cursor=Depends(get_db_cursor)):
     try:
         cursor.execute("SELECT MAX(last_synced_at) FROM raw_assets")
         result = cursor.fetchone()[0]
         if result:
-            # Format it nicely for the frontend (e.g., "YYYY-MM-DD HH:MM:SS")
             formatted_date = result.strftime("%Y-%m-%d %H:%M:%S")
             return {"last_sync": formatted_date}
         return {"last_sync": "Never"}
     except Exception as e:
-        print(f"Error fetching last sync: {e}")
         return {"last_sync": "Unknown"}
 
 
 @router.post("/assets/manual")
-def create_manual_asset(
-    payload: dict, 
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_admin),
-    cursor=Depends(get_db_cursor)
-):
+def create_manual_asset(payload: dict, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     try:
-        # Automated Fields
         inv_id = f"MANUAL_{uuid.uuid4().hex[:8]}"
         number = payload.get('number') or f"TCKT_{uuid.uuid4().hex[:6]}"
         
-        # Helper to convert empty strings to None for strict Postgres columns (Integers, Dates, Timestamps)
         def clean_val(val):
             return None if val == "" else val
 
-        # 1. Insert into Master Table (raw_assets) handling all 49 insertable fields
         cursor.execute('''
             INSERT INTO raw_assets (
                 inventory_id, legacy_id, name, managing_organization, hosting_location, type, status, stage, 
@@ -763,14 +606,7 @@ def create_manual_asset(
                 planned_with_ritm, month_planned, week_planned, tested_2024_ritm, tested_2025_ritm, prevision_2027, 
                 confirmed_by_market, status_manual_tracking
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s, %s, %s, %s, 
-                CURRENT_DATE, %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s, %s, 
-                %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
         ''', (
             inv_id, clean_val(payload.get('legacy_id') or 0), payload.get('name', 'New Manual Asset'), 
@@ -793,7 +629,6 @@ def create_manual_asset(
             payload.get('status_manual_tracking', 'Not Planned')
         ))
 
-        # 2. Conditional Insert into UI Table (assets) based on your Golden Rules
         if payload.get('pentest_queue', True) is True and payload.get('status_manual_tracking') != '2027':
             cursor.execute('''
                 INSERT INTO assets (
@@ -809,76 +644,35 @@ def create_manual_asset(
         return {"message": "Asset created successfully!"}
 
     except Exception as e:
-        print(f"Manual Creation Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/assets/raw")
-def delete_raw_asset(
-    inventory_id: str, 
-    number: str, 
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_admin),
-    cursor=Depends(get_db_cursor)
-):
+def delete_raw_asset(inventory_id: str, number: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     try:
-        # 1. Find the internal UI asset ID linked to this Master Record
         cursor.execute("SELECT id FROM assets WHERE inventory_id = %s AND number = %s", (inventory_id, number))
         asset_row = cursor.fetchone()
 
         if asset_row:
             ui_asset_id = asset_row[0]
-            
-            
-            # Find any tests that were linked to this specific asset
             cursor.execute("SELECT test_id FROM test_assets WHERE asset_id = %s", (ui_asset_id,))
             linked_tests = cursor.fetchall()
             
-            # Annihilate the tests, their team assignments, and their history
             for (test_id,) in linked_tests:
                 cursor.execute("DELETE FROM assignments WHERE test_id = %s", (test_id,))
                 cursor.execute("DELETE FROM test_history WHERE test_id = %s", (test_id,))
                 cursor.execute("DELETE FROM test_assets WHERE test_id = %s", (test_id,))
                 cursor.execute("DELETE FROM tests WHERE id = %s", (test_id,))
             
-
-            # 3. Delete the asset from the UI Planner board
             cursor.execute("DELETE FROM assets WHERE id = %s", (ui_asset_id,))
 
-        # 4. Delete the Master Record completely
         cursor.execute("DELETE FROM raw_assets WHERE inventory_id = %s AND number = %s", (inventory_id, number))
-
         cursor.connection.commit()
 
-        # Broadcast the deletion so every user's screen updates instantly
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-
-        background_tasks.add_task(
-            log_audit_event,
-            user_id=current_user["id"],
-            username=current_user["username"],
-            action="DELETE_ASSET",
-            resource_type="ASSET",
-            details=f"Permanently deleted asset and severed all test links: {inventory_id} / {number}"
-        )
+        background_tasks.add_task(log_audit_event, user_id=current_user["id"], username=current_user["username"], action="DELETE_ASSET", resource_type="ASSET", details=f"Permanently deleted asset: {inventory_id} / {number}")
 
         return {"message": "Asset completely purged from the system."}
-
     except Exception as e:
-        print(f"Delete Asset Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-        
-# Temp function to bring back to live the Adv Sim test.
-# @router.post("/assets/resurrect-ghosts")
-# def resurrect_ghost_assets(cursor=Depends(get_db_cursor)):
-#     # This finds all assets that are missing from raw_assets and copies them over!
-#     cursor.execute('''
-#         INSERT INTO raw_assets (inventory_id, legacy_id, number, name, market, gost_service, pentest_queue)
-#         SELECT a.inventory_id, COALESCE(NULLIF(a.ext_id, ''), '0')::integer, a.number, a.name, a.market, a.gost_service, TRUE
-#         FROM assets a
-#         LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
-#         WHERE ra.inventory_id IS NULL;
-#     ''')
-#     return {"message": "Ghost assets resurrected!"}
