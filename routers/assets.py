@@ -316,8 +316,8 @@ def migrate_legacy_sheet(request: Request, background_tasks: BackgroundTasks, cu
         df.columns = df.columns.str.strip()
         if 'Pentest Queue' in df.columns:
             df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
-        if 'Status_manual_tracking' in df.columns:
-            df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
+        # if 'Status_manual_tracking' in df.columns:
+        #     df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
         df = df.fillna('')
 
         success_count = 0
@@ -503,19 +503,19 @@ def get_asset_test_history(
         columns = [col[0] for col in cursor.description]
         tests = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-        # 2. Grab the allocated_credits directly from the assignments table!
+        # 2. Grab the assignments safely using PostgreSQL ANY() array syntax
         if tests:
-            test_ids = tuple([t["id"] for t in tests])
+            test_ids = [t["id"] for t in tests]
+            
             cursor.execute("""
-                SELECT a.test_id, a.user_id, u.name as user_name, a.allocated_credits
+                SELECT a.test_id, a.user_id, u.name as user_name, u.base_capacity
                 FROM assignments a
                 JOIN users u ON a.user_id = u.id
-                WHERE a.test_id IN %s
+                WHERE a.test_id = ANY(%s)
             """, (test_ids,))
             
             assignments_raw = cursor.fetchall()
             
-            # Map assignments to their respective tests
             for test in tests:
                 test_assigns = [row for row in assignments_raw if row[0] == test["id"]]
                 
@@ -523,19 +523,23 @@ def get_asset_test_history(
                 for row in test_assigns:
                     user_id = row[1]
                     user_name = row[2]
-                    # Safely handle the credits
-                    credits = float(row[3]) if row[3] else 0.0
+                    # Safely grab capacity (fallback to 1.0 if not defined)
+                    base_cap = float(row[3]) if row[3] is not None else 1.0
                     
                     if user_id not in user_totals:
                         user_totals[user_id] = {"user_name": user_name, "allocated_credits": 0}
-                    user_totals[user_id]["allocated_credits"] += credits
+                    
+                    # Add their weekly capacity for each week they are assigned
+                    user_totals[user_id]["allocated_credits"] += base_cap
 
                 test["assignments"] = list(user_totals.values())
 
         return tests
     except Exception as e:
-        print(f"History Fetch Error: {e}")
-        return []
+        # DO NOT FAIL SILENTLY. Print the error to the console!
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database Error: {str(e)}")
 
 
 @router.put("/assets/tracking")
