@@ -1,5 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import traceback
 from routers import auth, users, assets, tests, board
 from websockets_manager import manager
 from services.importer import run_import_job
@@ -25,7 +27,7 @@ async def scheduled_sync_job():
     print("✅ Automated daily sync complete and broadcasted.")
 
 
-# --- 2. Attach the Scheduler to the App Lifespan ---
+# Attach the Scheduler to the App Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Start the clock when the server spins up
@@ -88,6 +90,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# --- GLOBAL ERROR LOGGER ---
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # 1. Grab the exact endpoint that crashed
+    path = request.url.path
+    error_msg = str(exc)
+    
+    # 2. Log it to your BigQuery / Audit DB as the "SYSTEM" user
+    try:
+        from audit_logger import log_audit_event
+        log_audit_event(
+            user_id="SYSTEM",
+            username="system@server",
+            action="SYSTEM_ERROR",
+            resource_type="BACKEND",
+            details=f"CRASH at {path}: {error_msg}"
+        )
+    except Exception as log_err:
+        print(f"Failed to write to audit log: {log_err}")
+        
+    # 3. Print the full traceback to the Google Cloud Run console for debugging
+    print("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+
+    # 4. Return a generic, safe message to the React UI so it doesn't crash
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred and has been logged."}
+    )
 
 # Wire up all the separated routes!
 app.include_router(auth.router, prefix="/api")

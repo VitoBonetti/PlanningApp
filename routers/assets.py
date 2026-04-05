@@ -603,7 +603,7 @@ def get_asset_test_history(
         raise HTTPException(status_code=403, detail="Not authorized.")
 
     try:
-        # Safely joining without ext_id/legacy_id to avoid the 0 vs "" mismatch!
+        # 1. Fetch the core tests linked to the asset
         cursor.execute("""
             SELECT t.id, t.name, t.type, t.status, t.start_week, t.start_year, t.credits_per_week, t.duration_weeks
             FROM tests t
@@ -614,9 +614,43 @@ def get_asset_test_history(
         """, (inventory_id, number))
         
         columns = [col[0] for col in cursor.description]
-        history = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        
-        return history
+        tests = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        # 2. Fetch the assignments for ALL of those tests and attach them
+        if tests:
+            test_ids = tuple([t["id"] for t in tests])
+            cursor.execute("""
+                SELECT a.test_id, a.user_id, u.name as user_name, a.week_number
+                FROM assignments a
+                JOIN users u ON a.user_id = u.id
+                WHERE a.test_id IN %s
+            """, (test_ids,))
+            
+            assignments_raw = cursor.fetchall()
+            
+            # Map assignments to tests
+            for test in tests:
+                test["assignments"] = []
+                test_assigns = [row for row in assignments_raw if row[0] == test["id"]]
+                
+                # Group by user to calculate total credits (capacity per week * weeks assigned)
+                user_totals = {}
+                for row in test_assigns:
+                    user_id = row[1]
+                    user_name = row[2]
+                    week_num = row[3]
+                    
+                    # Fetch capacity for that week
+                    from routers.board import get_user_provision_internal
+                    credits = get_user_provision_internal(cursor, user_id, test["start_year"], week_num)
+                    
+                    if user_id not in user_totals:
+                        user_totals[user_id] = {"user_name": user_name, "allocated_credits": 0}
+                    user_totals[user_id]["allocated_credits"] += credits
+
+                test["assignments"] = list(user_totals.values())
+
+        return tests
     except Exception as e:
         print(f"History Fetch Error: {e}")
         return []
