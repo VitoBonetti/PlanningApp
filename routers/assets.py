@@ -483,7 +483,6 @@ def get_raw_assets(
 @router.get("/assets/history")
 def get_asset_test_history(
     inventory_id: str, 
-    number: str, 
     current_user: dict = Depends(get_current_user), 
     cursor=Depends(get_db_cursor)
 ):
@@ -491,24 +490,24 @@ def get_asset_test_history(
         raise HTTPException(status_code=403, detail="Not authorized.")
 
     try:
-        # 1. Fetch the core tests linked to the asset
+        # 1. Fetch the tests safely using ONLY the inventory_id
         cursor.execute("""
             SELECT t.id, t.name, t.type, t.status, t.start_week, t.start_year, t.credits_per_week, t.duration_weeks
             FROM tests t
             JOIN test_assets ta ON t.id = ta.test_id
             JOIN assets a ON ta.asset_id = a.id
-            WHERE a.inventory_id = %s AND a.number = %s
+            WHERE a.inventory_id = %s
             ORDER BY t.start_year DESC, t.start_week DESC
-        """, (inventory_id, number))
+        """, (inventory_id,))
         
         columns = [col[0] for col in cursor.description]
         tests = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-        # 2. Fetch the assignments for ALL of those tests and attach them
+        # 2. Grab the allocated_credits directly from the assignments table!
         if tests:
             test_ids = tuple([t["id"] for t in tests])
             cursor.execute("""
-                SELECT a.test_id, a.user_id, u.name as user_name, a.week_number
+                SELECT a.test_id, a.user_id, u.name as user_name, a.allocated_credits
                 FROM assignments a
                 JOIN users u ON a.user_id = u.id
                 WHERE a.test_id IN %s
@@ -516,20 +515,16 @@ def get_asset_test_history(
             
             assignments_raw = cursor.fetchall()
             
-            # Map assignments to tests
+            # Map assignments to their respective tests
             for test in tests:
-                test["assignments"] = []
                 test_assigns = [row for row in assignments_raw if row[0] == test["id"]]
                 
-                # Group by user to calculate total credits (capacity per week * weeks assigned)
                 user_totals = {}
                 for row in test_assigns:
                     user_id = row[1]
                     user_name = row[2]
-                    week_num = row[3]
-                    
-                    from routers.board import get_user_provision_internal
-                    credits = get_user_provision_internal(cursor, user_id, test["start_year"], week_num)
+                    # Safely handle the credits
+                    credits = float(row[3]) if row[3] else 0.0
                     
                     if user_id not in user_totals:
                         user_totals[user_id] = {"user_name": user_name, "allocated_credits": 0}
