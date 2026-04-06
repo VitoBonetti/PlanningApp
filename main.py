@@ -146,7 +146,11 @@ async def websocket_endpoint(websocket: WebSocket):
     
     if not iap_header:
         # Fallback for local laptop testing
-        username = os.environ.get("MASTER_ADMIN_EMAIL", "admin@yourcompany.com").lower()
+        if os.environ.get("ENV") == "local":
+            username = os.environ.get("MASTER_ADMIN_EMAIL").lower()
+        else:
+            await websocket.close(code=1008, reason="Unauthorized: Missing IAP identity header")
+            return
     else:
         # Extract the email from the IAP header
         username = iap_header.split(":")[-1].lower()

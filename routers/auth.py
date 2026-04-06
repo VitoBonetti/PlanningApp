@@ -18,10 +18,15 @@ def get_current_user(request: Request, cursor = Depends(get_db_cursor)):
     iap_header = request.headers.get("x-goog-authenticated-user-email")
     
     if not iap_header:
-        # Fallback for local testing (if you run the app on your laptop without IAP)
-        email = MASTER_ADMIN_EMAIL.lower()
+        if os.environ.get("ENV") == "local":
+            email = MASTER_ADMIN_EMAIL.lower()
+        else:
+            # If we are in production and there is no IAP header, KILL the request.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Unauthorized: Missing Google IAP identity header. Direct access is forbidden."
+            )
     else:
-        # IAP returns the format "accounts.google.com:vito@vitobonetti.nl", so we split it
         email = iap_header.split(":")[-1].lower()
 
     # 2. Check if the user exists in your database
