@@ -44,9 +44,9 @@ def get_current_user(request: Request, cursor = Depends(get_db_cursor)):
         
         # Insert them into the database using a dummy password
         cursor.execute("""
-            INSERT INTO users (id, username, name, role, location, base_capacity, start_week, hashed_password)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id, username, name, role, location
-        """, (new_id, email, name, role, "HQ", 1.0, 1, "IAP_MANAGED"))
+            INSERT INTO users (id, username, name, role, location, base_capacity, start_week)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id, username, name, role, location
+        """, (new_id, email, name, role, "HQ", 1.0, 1))
         
         user = cursor.fetchone()
         cursor.connection.commit()

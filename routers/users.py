@@ -39,9 +39,9 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks,
     new_id = str(uuid.uuid4())
 
     cursor.execute(
-        '''INSERT INTO users (id, username, name, role, location, base_capacity, start_week, hashed_password)
+        '''INSERT INTO users (id, username, name, role, location, base_capacity, start_week)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
-        (new_id, u.username.lower(), u.name, u.role, u.location, u.base_capacity, u.start_week, "IAP_MANAGED")
+        (new_id, u.username.lower(), u.name, u.role, u.location, u.base_capacity, u.start_week)
     )
     
     cursor.connection.commit()
