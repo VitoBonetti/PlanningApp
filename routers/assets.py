@@ -569,9 +569,11 @@ def get_asset_test_history(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Database Error: {str(e)}")
 
+
 @router.put("/assets/tracking")
 def update_asset_tracking(inventory_id: str, number: str, data: AssetTrackingUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     try:
+        # Update the master raw_assets table
         cursor.execute("""
             UPDATE raw_assets SET
                 pentest_queue = %s, gost_service = %s, whitebox_category = %s, quarter_planned = %s,
@@ -579,15 +581,47 @@ def update_asset_tracking(inventory_id: str, number: str, data: AssetTrackingUpd
                 tested_2024_ritm = %s, tested_2025_ritm = %s, prevision_2027 = %s, confirmed_by_market = %s,
                 status_manual_tracking = %s
             WHERE inventory_id = %s AND number = %s
+            RETURNING name, market, legacy_id
         """, (
             data.pentest_queue, data.gost_service, data.whitebox_category, data.quarter_planned, data.year_planned, data.planned_with_ritm,
             data.month_planned, data.week_planned, data.tested_2024_ritm, data.tested_2025_ritm, data.prevision_2027, data.confirmed_by_market,
             data.status_manual_tracking, inventory_id, number
         ))
+        
+        updated_raw = cursor.fetchone()
 
-        cursor.execute("""
-            UPDATE assets SET gost_service = %s, whitebox_category = %s WHERE inventory_id = %s AND number = %s
-        """, (data.gost_service, data.whitebox_category, inventory_id, number))
+        # Sync with the actively planned `assets` table
+        if data.pentest_queue is True and data.status_manual_tracking != '2027':
+            # Upsert into assets table (Insert if it doesn't exist, Update if it does)
+            if updated_raw:
+                asset_name, asset_market, asset_legacy_id = updated_raw
+                
+                # First check if it's already there
+                cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND number=%s", (inventory_id, number))
+                existing_asset = cursor.fetchone()
+                
+                if existing_asset:
+                    # Just update the tracking fields
+                    cursor.execute("""
+                        UPDATE assets SET gost_service = %s, whitebox_category = %s 
+                        WHERE inventory_id = %s AND number = %s
+                    """, (data.gost_service, data.whitebox_category, inventory_id, number))
+                else:
+                    # It's not in the planned board yet, we MUST insert it now!
+                    cursor.execute("""
+                        INSERT INTO assets (
+                            id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)
+                    """, (
+                        str(uuid.uuid4()), inventory_id, str(asset_legacy_id or 0), number, 
+                        asset_name, asset_market, data.gost_service, None, None, data.whitebox_category
+                    ))
+        else:
+            # If they unqueued it, or pushed to 2027, update existing if present
+            cursor.execute("""
+                UPDATE assets SET gost_service = %s, whitebox_category = %s 
+                WHERE inventory_id = %s AND number = %s
+            """, (data.gost_service, data.whitebox_category, inventory_id, number))
 
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
         background_tasks.add_task(log_audit_event, user_id=current_user["id"], username=current_user["username"], action="UPDATE_ASSET_TRACKING", resource_type="ASSET", details=f"Updated manual tracking fields for {inventory_id} / {number}")
