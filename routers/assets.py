@@ -67,8 +67,6 @@ def process_excel_background(contents: bytes):
             
             if 'Pentest Queue' in df.columns:
                 df = df[df['Pentest Queue'].astype(str).str.strip().str.upper() == 'YES']
-            if 'Status_manual_tracking' in df.columns:
-                df = df[df['Status_manual_tracking'].astype(str).str.strip() != '2027']
             
             df = df.fillna('')
 
@@ -263,7 +261,9 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
         LEFT JOIN tests t ON ta.test_id = t.id
         WHERE ra.pentest_queue = TRUE 
-          AND COALESCE(ra.status_manual_tracking, '') != '2027'
+          AND (ra.year_planned = EXTRACT(YEAR FROM CURRENT_DATE)::TEXT 
+               OR ra.year_planned IS NULL 
+               OR ra.year_planned = '')
         ORDER BY t.start_year DESC, t.start_week DESC
     ''')
 
@@ -592,7 +592,9 @@ def update_asset_tracking(inventory_id: str, number: str, data: AssetTrackingUpd
         asset_uuid = None
 
         # Sync with the actively planned `assets` table
-        if data.pentest_queue is True and data.status_manual_tracking != '2027':
+        current_year = str(datetime.now().year)
+        is_active_year = (not data.year_planned) or str(data.year_planned).strip() == '' or str(data.year_planned) == current_year
+        if data.pentest_queue is True and is_active_year:
             if updated_raw:
                 asset_name, asset_market, asset_legacy_id = updated_raw
                 
@@ -696,7 +698,11 @@ def create_manual_asset(payload: dict, background_tasks: BackgroundTasks, curren
             payload.get('status_manual_tracking', 'Not Planned')
         ))
 
-        if payload.get('pentest_queue', True) is True and payload.get('status_manual_tracking') != '2027':
+        current_year = str(datetime.now().year)
+        yp = payload.get('year_planned')
+        is_active_year = (not yp) or str(yp).strip() == '' or str(yp) == current_year
+
+        if payload.get('pentest_queue', True) is True and is_active_year:
             cursor.execute('''
                 INSERT INTO assets (
                     id, inventory_id, ext_id, number, name, market, gost_service, whitebox_category, is_assigned
