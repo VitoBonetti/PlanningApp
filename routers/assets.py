@@ -446,8 +446,8 @@ def get_raw_assets(
     business_critical: Optional[int] = None,
     year_planned: Optional[str] = None,
     quarter_planned: Optional[str] = None,
-    kpi_only: Optional[bool] = None, 
-    pentest_queue_only: Optional[bool] = None, 
+    kpi: Optional[bool] = None, 
+    pentest_queue: Optional[bool] = None, 
     current_user: dict = Depends(get_current_user), 
     cursor=Depends(get_db_cursor)
 ):
@@ -465,10 +465,13 @@ def get_raw_assets(
             params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
             
         # 2. Checkbox Toggles
-        if kpi_only:
-            where_clauses.append("kpi = TRUE")
-        if pentest_queue_only:
-            where_clauses.append("pentest_queue = TRUE")
+        if kpi is not None:
+            where_clauses.append("kpi = %s")
+            params.append(kpi)
+            
+        if pentest_queue is not None:
+            where_clauses.append("pentest_queue = %s")
+            params.append(pentest_queue)
 
         # 3. Advanced Filters
         if market:
