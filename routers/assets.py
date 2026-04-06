@@ -481,7 +481,7 @@ def get_raw_assets(
             where_clauses.append("gost_service ILIKE %s")
             params.append(f"%{gost_service}%")
         if status:
-            where_clauses.append("status ILIKE %s")
+            where_clauses.append("status_manual_tracking ILIKE %s")
             params.append(f"%{status}%")
         if business_critical:
             where_clauses.append("business_critical = %s")
