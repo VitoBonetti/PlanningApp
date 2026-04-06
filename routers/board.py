@@ -276,6 +276,7 @@ def wipe_system(request: Request, background_tasks: BackgroundTasks, current_use
     cursor.execute('DELETE FROM tests')
     cursor.execute('DELETE FROM assets')
     cursor.execute('DELETE FROM raw_assets')
+    cursor.execute('DELETE FROM notifications')
     # cursor.execute('DELETE FROM events')  # Temporary comment out
 
     conn.commit()
