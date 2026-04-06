@@ -139,15 +139,15 @@ class BulkTestCreate(BaseModel):
 
 class AssetTrackingUpdate(BaseModel):
     pentest_queue: bool
-    gost_service: str
-    whitebox_category: str
-    quarter_planned: str
-    year_planned: str
-    planned_with_ritm: bool
-    month_planned: str
-    week_planned: str
-    tested_2024_ritm: str
-    tested_2025_ritm: str
-    prevision_2027: str
-    confirmed_by_market: bool
-    status_manual_tracking: str
+    gost_service: Optional[str] = None
+    whitebox_category: Optional[str] = None
+    quarter_planned: Optional[str] = None
+    year_planned: Optional[str] = None
+    planned_with_ritm: Optional[bool] = None
+    month_planned: Optional[str] = None
+    week_planned: Optional[str] = None
+    tested_2024_ritm: Optional[str] = None
+    tested_2025_ritm: Optional[str] = None
+    prevision_2027: Optional[str] = None
+    confirmed_by_market: Optional[bool] = None
+    status_manual_tracking: Optional[str] = None
