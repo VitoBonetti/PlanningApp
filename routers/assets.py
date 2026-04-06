@@ -438,8 +438,17 @@ def sync_assets_from_drive(request: Request, background_tasks: BackgroundTasks, 
 
 @router.get("/assets/raw")
 def get_raw_assets(
-    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=500), search: Optional[str] = None, market: Optional[str] = None,
-    kpi_only: Optional[bool] = None, pentest_queue_only: Optional[bool] = None, current_user: dict = Depends(get_current_user), 
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=500), 
+    search: Optional[str] = None, 
+    market: Optional[str] = None,
+    gost_service: Optional[str] = None,
+    status: Optional[str] = None,
+    business_critical: Optional[int] = None,
+    year_planned: Optional[str] = None,
+    quarter_planned: Optional[str] = None,
+    kpi_only: Optional[bool] = None, 
+    pentest_queue_only: Optional[bool] = None, 
+    current_user: dict = Depends(get_current_user), 
     cursor=Depends(get_db_cursor)
 ):
     if current_user.get("role") == "pentester":
@@ -450,23 +459,45 @@ def get_raw_assets(
         params = []
         where_clauses = []
 
+        # 1. Base Search (Name, ID, Number)
         if search:
             where_clauses.append("(name ILIKE %s OR inventory_id ILIKE %s OR number ILIKE %s)")
             params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
-        if market:
-            where_clauses.append("market ILIKE %s")
-            params.append(f"%{market}%")
-
+            
+        # 2. Checkbox Toggles
         if kpi_only:
             where_clauses.append("kpi = TRUE")
         if pentest_queue_only:
             where_clauses.append("pentest_queue = TRUE")
 
+        # 3. Advanced Filters
+        if market:
+            where_clauses.append("market ILIKE %s")
+            params.append(f"%{market}%")
+        if gost_service:
+            where_clauses.append("gost_service ILIKE %s")
+            params.append(f"%{gost_service}%")
+        if status:
+            where_clauses.append("status ILIKE %s")
+            params.append(f"%{status}%")
+        if business_critical:
+            where_clauses.append("business_critical = %s")
+            params.append(business_critical)
+        if year_planned:
+            where_clauses.append("year_planned ILIKE %s")
+            params.append(f"%{year_planned}%")
+        if quarter_planned:
+            where_clauses.append("quarter_planned ILIKE %s")
+            params.append(f"%{quarter_planned}%")
+
+        # Assemble the final WHERE clause
         where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
+        # Get total count for pagination
         cursor.execute(f"SELECT COUNT(*) FROM raw_assets {where_str}", tuple(params))
         total_items = cursor.fetchone()[0]
 
+        # Fetch the paginated data
         cursor.execute(f"SELECT * FROM raw_assets {where_str} ORDER BY name ASC LIMIT %s OFFSET %s", tuple(params + [limit, offset]))
         
         columns = [col[0] for col in cursor.description]
