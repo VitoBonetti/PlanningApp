@@ -589,10 +589,10 @@ def update_asset_tracking(inventory_id: str, number: str, data: AssetTrackingUpd
         ))
         
         updated_raw = cursor.fetchone()
+        asset_uuid = None
 
         # Sync with the actively planned `assets` table
         if data.pentest_queue is True and data.status_manual_tracking != '2027':
-            # Upsert into assets table (Insert if it doesn't exist, Update if it does)
             if updated_raw:
                 asset_name, asset_market, asset_legacy_id = updated_raw
                 
@@ -601,32 +601,39 @@ def update_asset_tracking(inventory_id: str, number: str, data: AssetTrackingUpd
                 existing_asset = cursor.fetchone()
                 
                 if existing_asset:
+                    asset_uuid = existing_asset[0]
                     # Just update the tracking fields
                     cursor.execute("""
                         UPDATE assets SET gost_service = %s, whitebox_category = %s 
-                        WHERE inventory_id = %s AND number = %s
-                    """, (data.gost_service, data.whitebox_category, inventory_id, number))
+                        WHERE id = %s
+                    """, (data.gost_service, data.whitebox_category, asset_uuid))
                 else:
-                    # It's not in the planned board yet, we MUST insert it now!
+                    # It's not in the planned board yet, we MUST insert it now and grab the UUID!
+                    asset_uuid = str(uuid.uuid4())
                     cursor.execute("""
                         INSERT INTO assets (
                             id, inventory_id, ext_id, number, name, market, gost_service, is_assigned, business_critical, kpi, whitebox_category
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)
                     """, (
-                        str(uuid.uuid4()), inventory_id, str(asset_legacy_id or 0), number, 
+                        asset_uuid, inventory_id, str(asset_legacy_id or 0), number, 
                         asset_name, asset_market, data.gost_service, None, None, data.whitebox_category
                     ))
         else:
-            # If they unqueued it, or pushed to 2027, update existing if present
-            cursor.execute("""
-                UPDATE assets SET gost_service = %s, whitebox_category = %s 
-                WHERE inventory_id = %s AND number = %s
-            """, (data.gost_service, data.whitebox_category, inventory_id, number))
+            # If they unqueued it, update existing if present
+            cursor.execute("SELECT id FROM assets WHERE inventory_id=%s AND number=%s", (inventory_id, number))
+            existing_asset = cursor.fetchone()
+            if existing_asset:
+                asset_uuid = existing_asset[0]
+                cursor.execute("""
+                    UPDATE assets SET gost_service = %s, whitebox_category = %s 
+                    WHERE id = %s
+                """, (data.gost_service, data.whitebox_category, asset_uuid))
 
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
         background_tasks.add_task(log_audit_event, user_id=current_user["id"], username=current_user["username"], action="UPDATE_ASSET_TRACKING", resource_type="ASSET", details=f"Updated manual tracking fields for {inventory_id} / {number}")
 
-        return {"message": "Tracking updated successfully"}
+        
+        return {"message": "Tracking updated successfully", "asset_id": asset_uuid}
 
     except Exception as e:
         print(f"Update Tracking Error: {e}")
