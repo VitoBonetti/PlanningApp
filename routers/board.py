@@ -13,12 +13,24 @@ router = APIRouter(tags=["Board & Events"])
 def get_user_provision_internal(cursor, user_id, year, week_number):
     """Calculates exactly how much capacity a user provides in a specific week,
     accounting for holidays and their start date."""
-    cursor.execute('SELECT base_capacity, location, start_week FROM users WHERE id = %s', (user_id,))
+    cursor.execute('SELECT base_capacity, location, start_week, start_year, end_week, end_year FROM users WHERE id = %s', (user_id,))
     user_data = cursor.fetchone()
     if not user_data: return 0.0
-    base_cap, user_location, start_week = user_data
+    base_cap, user_location, start_week, start_year, end_week, end_year = user_data
 
     if start_week is None: start_week = 1
+    if start_year is None: start_year = 2024
+
+    if year < start_year: 
+        return 0.0
+    if year == start_year and week_number < start_week: 
+        return 0.0
+
+    if end_year and year > end_year:
+        return 0.0
+    if end_year and year == end_year and end_week and week_number > end_week:
+        return 0.0
+
     if week_number < start_week: return 0.0
 
     # Fetch all relevant events (holidays, team days)
@@ -198,9 +210,19 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
     cursor.execute('SELECT id, name, max_concurrent_per_week FROM services')
     services = [{"id": r[0], "name": r[1], "max_per_week": r[2]} for r in cursor.fetchall()]
 
-    cursor.execute('SELECT id, name, role, location, base_capacity, username, start_week FROM users')
-    pentesters = [{"id": r[0], "name": r[1], "role": r[2], "location": r[3], "capacity": r[4], "username": r[5],
-                   "start_week": r[6]} for r in cursor.fetchall()]
+    cursor.execute('SELECT id, name, role, location, base_capacity, username, start_week, start_year, end_week, end_year FROM users')
+    pentesters = [{
+        "id": r[0], 
+        "name": r[1], 
+        "role": r[2], 
+        "location": r[3], 
+        "capacity": r[4], 
+        "username": r[5],
+        "start_week": r[6],
+        "start_year": r[7],   
+        "end_week": r[8],    
+        "end_year": r[9]   
+    } for r in cursor.fetchall()]
 
     # Join with tests to check the status, and explicitly filter by year
     cursor.execute('''
