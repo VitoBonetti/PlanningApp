@@ -158,3 +158,13 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
+
+
+@app.get("/api/system/version")
+def get_system_version():
+    """Returns application version and build context from Cloud Build."""
+    return {
+        "commit_sha": os.environ.get("COMMIT_SHA", "local-dev"),
+        "branch": os.environ.get("BRANCH_NAME", "local"),
+        "build_id": os.environ.get("BUILD_ID", "untracked-local-build")
+    }
