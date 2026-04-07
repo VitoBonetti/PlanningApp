@@ -30,6 +30,20 @@ async def scheduled_sync_job():
 # Attach the Scheduler to the App Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize Database Tables
+    init_db()
+
+    # Check Database Connection
+    conn = get_db_connection()
+    if conn:
+        print("✅ System normal. Database connected.")
+        conn.close()
+    else:
+        print("🚨 CRITICAL: Cannot reach Cloud SQL via IAM. Check Service Account permissions.")
+
+    # nitialize BigQuery Audit Logs
+    init_audit_log_infrastructure()
+
     # Start the clock when the server spins up
     scheduler = AsyncIOScheduler()
     
@@ -48,24 +62,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
-
-@app.on_event("startup")
-def startup_event():
-    # 1. Initialize Database Tables
-    init_db()
-
-    # 2. Check Database Connection
-    conn = get_db_connection()
-    if conn:
-        print("✅ System normal. Database connected.")
-        conn.close()
-    else:
-        print("🚨 CRITICAL: Cannot reach Cloud SQL via IAM. Check Service Account permissions.")
-
-    # 3. Initialize BigQuery Audit Logs
-    init_audit_log_infrastructure()
-
 
 env_origins = os.environ.get("ALLOWED_ORIGINS", "")
 
