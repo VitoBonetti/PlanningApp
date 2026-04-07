@@ -1,8 +1,9 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
 from routers import auth, users, assets, tests, board
+from routers.auth import require_admin
 from websockets_manager import manager
 from services.importer import run_import_job
 from database import get_db_connection, init_db, db_cursor_context
@@ -161,10 +162,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.get("/api/system/version")
-def get_system_version():
+def get_system_version(current_user: dict = Depends(require_admin)):
     """Returns application version and build context from Cloud Build."""
     return {
         "commit_sha": os.environ.get("COMMIT_SHA", "local-dev"),
         "branch": os.environ.get("BRANCH_NAME", "local"),
-        "build_id": os.environ.get("BUILD_ID", "untracked-local-build")
+        "build_id": os.environ.get("BUILD_ID", "untracked-local-build"),
+        "repo_name": os.environ.get("REPO_NAME", "local-repo")
     }
