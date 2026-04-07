@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta
 from database import get_db_connection
 from routers.auth import get_current_user, require_admin, require_write_access, limiter
-from models import EventCreate, EventUpdate
+from models import EventCreate, EventUpdate, WhiteboxCategoryCreate, WhiteboxCategoryUpdate
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -275,6 +275,9 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
     # Matrix for column availability indicators
     cap_matrix = {p["id"]: {w: calculate_weekly_capacity(p["id"], year, w) for w in weeks} for p in pentesters}
 
+    cursor.execute('SELECT id, name, target_goal FROM whitebox_categories ORDER BY target_goal DESC')
+    wb_categories = [{"id": r[0], "name": r[1], "target_goal": r[2]} for r in cursor.fetchall()]
+
     conn.close()
 
     return {
@@ -282,8 +285,49 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
         "pentesters": pentesters, "capacities": cap_matrix,
         "backlog": backlog, "scheduled": scheduled,
         "assignments": assignments,
-        "events": events
+        "events": events,
+        "whitebox_categories": wb_categories
     }
+
+
+@router.post("/categories/whitebox")
+def create_wb_category(cat: WhiteboxCategoryCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    conn = get_db_connection()
+    c = conn.cursor()
+    new_id = str(uuid.uuid4())
+    try:
+        c.execute('INSERT INTO whitebox_categories (id, name, target_goal) VALUES (%s, %s, %s)', (new_id, cat.name, cat.target_goal))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail="Category name already exists.")
+    finally:
+        conn.close()
+        
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Category created"}
+
+
+@router.put("/categories/whitebox/{cat_id}")
+def update_wb_category(cat_id: str, cat: WhiteboxCategoryUpdate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('UPDATE whitebox_categories SET name=%s, target_goal=%s WHERE id=%s', (cat.name, cat.target_goal, cat_id))
+    conn.commit()
+    conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Category updated"}
+
+
+@router.delete("/categories/whitebox/{cat_id}")
+def delete_wb_category(cat_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('DELETE FROM whitebox_categories WHERE id=%s', (cat_id,))
+    conn.commit()
+    conn.close()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Category deleted"}
 
 
 @router.delete("/system/wipe")

@@ -100,3 +100,13 @@ class AssetTrackingUpdate(BaseModel):
     prevision_2027: Optional[str] = None
     confirmed_by_market: Optional[bool] = None
     status_manual_tracking: Optional[str] = None
+
+
+class WhiteboxCategoryCreate(BaseModel):
+    name: str
+    target_goal: int
+
+
+class WhiteboxCategoryUpdate(BaseModel):
+    name: str
+    target_goal: int
