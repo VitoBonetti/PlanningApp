@@ -38,10 +38,15 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks,
 
     new_id = str(uuid.uuid4())
 
+    # Ensure empty strings from frontend are treated as NULL
+    ew = u.end_week if str(u.end_week).strip() != '' else None
+    ey = u.end_year if str(u.end_year).strip() != '' else None
+
+    # Notice: 9 parameters in the SQL, 9 parameters in the tuple!
     cursor.execute(
-        '''INSERT INTO users (id, username, name, role, location, base_capacity, start_week)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
-        (new_id, u.username.lower(), u.name, u.role, u.location, u.base_capacity, u.start_week)
+        '''INSERT INTO users (id, username, name, role, location, base_capacity, start_week, start_year, end_week, end_year)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+        (new_id, u.username.lower(), u.name, u.role, u.location, u.base_capacity, u.start_week, u.start_year, ew, ey)
     )
     
     cursor.connection.commit()
@@ -58,15 +63,26 @@ def create_user(u: UserCreateSecure, background_tasks: BackgroundTasks,
     )
     
     return {"message": f"User {u.name} whitelisted in the database."}
-    
+
 
 @router.delete("/users/{user_id}")
 def delete_user(user_id: str, background_tasks: BackgroundTasks, 
                 current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """
+    SOFT DELETE: Instead of destroying history, we offboard the user instantly
+    by setting their end_year and end_week to today.
+    """
+    current_year = datetime.now().year
+    current_week = datetime.now().isocalendar()[1]
 
-    cursor.execute('DELETE FROM assignments WHERE user_id = %s', (user_id,))
-    cursor.execute('DELETE FROM events WHERE user_id = %s', (user_id,))
-    cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
+    # Soft Delete: Update the end date rather than deleting the row
+    cursor.execute(
+        'UPDATE users SET end_year = %s, end_week = %s WHERE id = %s', 
+        (current_year, current_week, user_id)
+    )
+    
+    # We DO NOT delete their assignments or events, so historical graphs stay accurate.
+    
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
@@ -74,12 +90,12 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
         log_audit_event,
         user_id=current_user["id"],
         username=current_user["username"],
-        action="DELETE_USER",
+        action="SOFT_DELETE_USER",
         resource_type="USER",
         resource_id=user_id,
-        details="Permanently deleted user account metadata."
+        details="Offboarded user. Historical data preserved."
     )
-    return {"message": "User deleted from system."}
+    return {"message": "User successfully offboarded."}
 
 
 @router.put("/users/{user_id}")
@@ -88,10 +104,17 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks,
     
     if u.role == 'read_only':
         u.base_capacity = 0.0
+
+    ew = u.end_week if str(u.end_week).strip() != '' else None
+    ey = u.end_year if str(u.end_year).strip() != '' else None
     
     cursor.execute(
-        'UPDATE users SET name=%s, role=%s, location=%s, base_capacity=%s, start_week=%s WHERE id=%s',
-        (u.name, u.role, u.location, u.base_capacity, u.start_week, user_id))
+        '''UPDATE users 
+           SET name=%s, role=%s, location=%s, base_capacity=%s, 
+               start_week=%s, start_year=%s, end_week=%s, end_year=%s 
+           WHERE id=%s''',
+        (u.name, u.role, u.location, u.base_capacity, u.start_week, u.start_year, ew, ey, user_id)
+    )
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
@@ -102,7 +125,7 @@ def update_user(user_id: str, u: UserUpdate, background_tasks: BackgroundTasks,
         action="UPDATE_USER",
         resource_type="USER",
         resource_id=user_id,
-        details="Updated user metadata (role/capacity)."
+        details="Updated user lifecycle metadata."
     )
     return {"message": "User updated."}
 

@@ -18,6 +18,9 @@ class UserCreateSecure(BaseModel):
     location: str
     base_capacity: float = 1.0
     start_week: int = 1
+    start_year: int = 2024
+    end_week: Optional[int] = None
+    end_year: Optional[int] = None
 
 
 class UserUpdate(BaseModel):
@@ -26,6 +29,9 @@ class UserUpdate(BaseModel):
     location: str
     base_capacity: float
     start_week: int
+    start_year: int
+    end_week: Optional[int] = None
+    end_year: Optional[int] = None
 
 
 class EventCreate(BaseModel):
