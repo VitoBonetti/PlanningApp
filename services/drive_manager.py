@@ -83,6 +83,62 @@ class DriveManager:
         except Exception as e:
             print(f"Failed to archive Drive workspace: {e}")
 
+    def scan_folder_for_files(self, folder_id: str):
+            """Fetches all files (ignoring sub-folders) inside a specific Drive folder."""
+            # Query: Inside this folder, NOT trashed, and NOT a folder itself
+            query = f"'{folder_id}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'"
+            try:
+                results = self.drive_service.files().list(
+                    q=query, 
+                    fields="files(id, name, mimeType, webViewLink, modifiedTime)", 
+                    supportsAllDrives=True, 
+                    includeItemsFromAllDrives=True
+                ).execute()
+                return results.get('files', [])
+            except Exception as e:
+                print(f"Error scanning folder {folder_id}: {e}")
+                return []
+
+
+    def run_daily_document_sync(self):
+        """Finds all provisioned test folders and indexes their files into the database."""
+        print("Starting Daily Drive Document Sync...")
+        
+        with db_cursor_context() as cursor:
+            # 1. Get all tests that have a Google Drive folder
+            cursor.execute("SELECT id, drive_folder_id FROM tests WHERE drive_folder_id IS NOT NULL")
+            tests_with_folders = cursor.fetchall()
+            
+            success_count = 0
+            
+            for test_id, folder_id in tests_with_folders:
+                files = self.scan_folder_for_files(folder_id)
+                
+                for f in files:
+                    # Convert Google's ISO time string to standard timestamp
+                    mod_time = datetime.strptime(f['modifiedTime'], "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
+                    
+                    # 2. UPSERT into the database
+                    cursor.execute('''
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (drive_file_id) 
+                        DO UPDATE SET 
+                            file_name = EXCLUDED.file_name,
+                            file_url = EXCLUDED.file_url,
+                            last_modified = EXCLUDED.last_modified,
+                            synced_at = CURRENT_TIMESTAMP
+                    ''', (
+                        str(uuid.uuid4()), test_id, f['id'], f['name'], 
+                        f.get('mimeType', 'unknown'), f.get('webViewLink', ''), mod_time
+                    ))
+                    success_count += 1
+            
+            # Optional: Delete records in the DB if they were removed from Google Drive
+            # (By deleting rows where synced_at is older than the start of this sync job)
+            
+            print(f"✅ Document Sync Complete. Indexed/Updated {success_count} files.")
+
 
 # Helper functions for FastAPI BackgroundTasks
 def background_provision_workspace(test_id, year, service_name, market, test_name):
@@ -91,60 +147,3 @@ def background_provision_workspace(test_id, year, service_name, market, test_nam
 
 def background_archive_workspace(folder_id, test_name):
     DriveManager().archive_test_workspace(folder_id, test_name)
-
-
-def scan_folder_for_files(self, folder_id: str):
-        """Fetches all files (ignoring sub-folders) inside a specific Drive folder."""
-        # Query: Inside this folder, NOT trashed, and NOT a folder itself
-        query = f"'{folder_id}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'"
-        try:
-            results = self.drive_service.files().list(
-                q=query, 
-                fields="files(id, name, mimeType, webViewLink, modifiedTime)", 
-                supportsAllDrives=True, 
-                includeItemsFromAllDrives=True
-            ).execute()
-            return results.get('files', [])
-        except Exception as e:
-            print(f"Error scanning folder {folder_id}: {e}")
-            return []
-
-
-def run_daily_document_sync(self):
-    """Finds all provisioned test folders and indexes their files into the database."""
-    print("Starting Daily Drive Document Sync...")
-    
-    with db_cursor_context() as cursor:
-        # 1. Get all tests that have a Google Drive folder
-        cursor.execute("SELECT id, drive_folder_id FROM tests WHERE drive_folder_id IS NOT NULL")
-        tests_with_folders = cursor.fetchall()
-        
-        success_count = 0
-        
-        for test_id, folder_id in tests_with_folders:
-            files = self.scan_folder_for_files(folder_id)
-            
-            for f in files:
-                # Convert Google's ISO time string to standard timestamp
-                mod_time = datetime.strptime(f['modifiedTime'], "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
-                
-                # 2. UPSERT into the database
-                cursor.execute('''
-                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (drive_file_id) 
-                    DO UPDATE SET 
-                        file_name = EXCLUDED.file_name,
-                        file_url = EXCLUDED.file_url,
-                        last_modified = EXCLUDED.last_modified,
-                        synced_at = CURRENT_TIMESTAMP
-                ''', (
-                    str(uuid.uuid4()), test_id, f['id'], f['name'], 
-                    f.get('mimeType', 'unknown'), f.get('webViewLink', ''), mod_time
-                ))
-                success_count += 1
-        
-        # Optional: Delete records in the DB if they were removed from Google Drive
-        # (By deleting rows where synced_at is older than the start of this sync job)
-        
-        print(f"✅ Document Sync Complete. Indexed/Updated {success_count} files.")
