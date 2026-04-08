@@ -67,6 +67,8 @@ class TestUpdate(BaseModel):
     duration_weeks: float
     status: Optional[str] = None
     whitebox_category: Optional[str] = ""
+    drive_folder_id: Optional[str] = None
+    drive_folder_url: Optional[str] = None
 
 
 class TestSchedule(BaseModel):

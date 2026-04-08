@@ -287,7 +287,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
     
     if test_data:
         t_name, t_type, s_name, t_market, drive_id = test_data
-        target_year = payload.get('start_year')
+        target_year = schedule.start_year
         
         # Only create if it's a test, has a year, and doesn't already have a folder
         if t_type != 'project' and target_year and not drive_id:
@@ -401,9 +401,17 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
         cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
     
     # Update everything else, safely saving the new Status!
-    cursor.execute(
-        'UPDATE tests SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, status=COALESCE(%s, status), whitebox_category=%s WHERE id=%s',
-        (t.name, t.service_id, t.credits_per_week, t.duration_weeks, t.status, t.whitebox_category, test_id))
+    cursor.execute('''
+        UPDATE tests 
+        SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, 
+            status=COALESCE(%s, status), whitebox_category=%s,
+            drive_folder_id=%s, drive_folder_url=%s
+        WHERE id=%s
+    ''', (
+        t.name, t.service_id, t.credits_per_week, t.duration_weeks, 
+        t.status, t.whitebox_category, t.drive_folder_id, t.drive_folder_url, 
+        test_id
+    ))
     cursor.connection.commit()
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
