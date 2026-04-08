@@ -31,7 +31,7 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     if end_year and year == end_year and end_week and week_number > end_week:
         return 0.0
 
-    if week_number < start_week: return 0.0
+    # if week_number < start_week: return 0.0
 
     # Fetch all relevant events (holidays, team days)
     cursor.execute("""
@@ -76,17 +76,18 @@ def calculate_weekly_capacity(user_id, year, week_number):
 
     # Check if they are already assigned to a test this week
     cursor.execute('''
-        SELECT SUM(a.allocated_credits) FROM assignments a
+        SELECT SUM(COALESCE(a.allocated_credits, u.base_capacity)) 
+        FROM assignments a
         JOIN tests t ON a.test_id = t.id
+        JOIN users u ON a.user_id = u.id
         WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
     ''', (user_id, year, week_number))
+    
+    used = cursor.fetchone()[0]
+    if used is None:
+        used = 0.0
 
-    is_assigned = cursor.fetchone() is not None
     conn.close()
-
-    # Their remaining capacity is their provision minus what they've already used
-    if is_assigned:
-        return 0.0
 
     return max(0.0, round(provision - used, 1))
 
@@ -227,7 +228,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
 
     # Join with tests to check the status, and explicitly filter by year
     cursor.execute('''
-        SELECT a.test_id, a.user_id, a.week_number, u.name, t.status 
+        SELECT a.test_id, a.user_id, a.week_number, u.name, t.status, a.allocated_credits 
         FROM assignments a 
         JOIN users u ON a.user_id = u.id
         JOIN tests t ON a.test_id = t.id
@@ -237,17 +238,22 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
 
     assignments = []
     for r in raw_assignments:
-        test_id, user_id, week_number, user_name, test_status = r
+        # Unpack the 6 values
+        test_id, user_id, week_number, user_name, test_status, allocated_credits = r
+        
+        # Use the saved math, falling back to full provision for old legacy rows
         if test_status == 'Unable':
-            dynamic_credits = 0.0
+            final_credits = 0.0
+        elif allocated_credits is not None:
+            final_credits = allocated_credits
         else:
-            dynamic_credits = get_user_provision_internal(cursor, user_id, year, week_number)
+            final_credits = get_user_provision_internal(cursor, user_id, year, week_number)
             
         assignments.append({
             "test_id": test_id,
             "user_id": user_id,
             "week_number": week_number,
-            "allocated_credits": dynamic_credits,
+            "allocated_credits": final_credits,
             "user_name": user_name
         })
 
