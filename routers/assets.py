@@ -255,7 +255,8 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
 
     cursor.execute('''
         SELECT a.id, a.inventory_id, a.ext_id, a.number, ra.name, ra.market, ra.gost_service,
-               a.is_assigned, t.status, t.start_week, t.start_year, ra.business_critical, ra.kpi, ra.whitebox_category
+               a.is_assigned, t.status, t.start_week, t.start_year, ra.business_critical, ra.kpi, ra.whitebox_category,
+               ra.estimated_date_pentest
         FROM assets a
         JOIN raw_assets ra ON a.inventory_id = ra.inventory_id AND a.number = ra.number
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
@@ -279,12 +280,15 @@ def get_available_assets(current_user: dict = Depends(get_current_user), cursor 
         if r[12] is True: kpi_display = 'Yes'
         elif r[12] is False: kpi_display = 'No'
 
+        est_date = r[14].strftime("%Y-%m-%d") if r[14] else None
+
         assets.append({
             "id": asset_id, "inventory_id": r[1], "ext_id": r[2], "number": r[3],
             "name": r[4], "market": r[5], "gost_service": r[6], "is_assigned": bool(r[7]),
             "test_status": r[8], "start_week": r[9], "start_year": r[10],
             "business_critical": r[11] if r[11] is not None else '',
-            "kpi": kpi_display, "whitebox_category": r[13] or ''
+            "kpi": kpi_display, "whitebox_category": r[13] or '',
+            "estimated_date_pentest": est_date
         })
 
     total_count = len(assets)
