@@ -257,14 +257,18 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
             "user_name": user_name
         })
 
-    cursor.execute('''SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category, type, (SELECT COUNT(*) FROM test_assets WHERE test_id = tests.id) FROM tests''')
+    cursor.execute('''SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category, type, (SELECT COUNT(*) FROM test_assets WHERE test_id = tests.id), drive_folder_id, drive_folder_url FROM tests''')
     all_tests = cursor.fetchall()
 
     backlog = []
     scheduled = []
     for t in all_tests:
-        test_obj = {"id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], "startWeek": t[5],
-                    "startYear": t[6], "status": t[7], "whitebox_category": t[8], "type": t[9], "asset_count": t[10]}
+        test_obj = {
+            "id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], 
+            "startWeek": t[5], "startYear": t[6], "status": t[7], "whitebox_category": t[8], 
+            "type": t[9], "asset_count": t[10],
+            "drive_folder_id": t[11], "drive_folder_url": t[12] 
+        }
         if t[5] is None:
             backlog.append(test_obj)
         else:
