@@ -4,6 +4,8 @@ from googleapiclient.discovery import build
 from database import db_cursor_context 
 import uuid
 from datetime import datetime
+import asyncio
+from websockets_manager import manager
 
 
 class DriveManager:
@@ -138,12 +140,76 @@ class DriveManager:
             # (By deleting rows where synced_at is older than the start of this sync job)
             
             print(f"✅ Document Sync Complete. Indexed/Updated {success_count} files.")
+            
+    def relocate_test_workspace(self, folder_id: str, new_year: int, new_service_name: str, new_market: str, new_test_name: str):
+        """Moves an existing folder to a new path and updates its name if necessary."""
+        try:
+            # 1. Resolve what the NEW target parent folder should be
+            reports_folder = self.get_or_create_folder("Reports", self.source_folder_id)
+            year_folder = self.get_or_create_folder(str(new_year), reports_folder['id'])
+            
+            service_lower = (new_service_name or "").lower()
+            if "white" in service_lower: clean_service = "White"
+            elif "black" in service_lower: clean_service = "Black"
+            elif "adversary" in service_lower: clean_service = "Adversary Simulation"
+            else: clean_service = "Other"
+            
+            service_folder = self.get_or_create_folder(clean_service, year_folder['id'])
+            
+            safe_market = new_market if new_market else "General"
+            market_folder = self.get_or_create_folder(safe_market, service_folder['id'])
+            
+            target_parent_id = market_folder['id']
+
+            # 2. Get the current folder's actual state from Google Drive
+            file = self.drive_service.files().get(
+                fileId=folder_id, fields='parents, name', supportsAllDrives=True
+            ).execute()
+            
+            current_parents = file.get('parents', [])
+            current_name = file.get('name')
+
+            # 3. Check what needs to change
+            body = {}
+            if current_name != new_test_name:
+                body['name'] = new_test_name  # Update name if the test was renamed!
+
+            needs_move = target_parent_id not in current_parents
+
+            # 4. Execute the Drive API Update
+            if needs_move:
+                previous_parents = ",".join(current_parents)
+                self.drive_service.files().update(
+                    fileId=folder_id,
+                    addParents=target_parent_id,
+                    removeParents=previous_parents,
+                    body=body if body else None,
+                    supportsAllDrives=True
+                ).execute()
+                print(f"Moved and/or renamed workspace to: {clean_service} > {safe_market} > {new_test_name}")
+            elif body:
+                self.drive_service.files().update(
+                    fileId=folder_id,
+                    body=body,
+                    supportsAllDrives=True
+                ).execute()
+                print(f"Renamed workspace to: {new_test_name}")
+                
+        except Exception as e:
+            print(f"Failed to relocate Drive workspace: {e}")
+
+# Add this to the bottom with your other async helpers:
+async def background_relocate_workspace(folder_id, year, service_name, market, test_name):
+    import asyncio
+    await asyncio.to_thread(DriveManager().relocate_test_workspace, folder_id, year, service_name, market, test_name)
 
 
 # Helper functions for FastAPI BackgroundTasks
-def background_provision_workspace(test_id, year, service_name, market, test_name):
-    DriveManager().provision_test_workspace(test_id, year, service_name, market, test_name)
+async def background_provision_workspace(test_id, year, service_name, market, test_name):
+    await asyncio.to_thread(DriveManager().provision_test_workspace, test_id, year, service_name, market, test_name)
+    
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
 
-
-def background_archive_workspace(folder_id, test_name):
-    DriveManager().archive_test_workspace(folder_id, test_name)
+async def background_archive_workspace(folder_id, test_name):
+    await asyncio.to_thread(DriveManager().archive_test_workspace, folder_id, test_name)
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')

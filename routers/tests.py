@@ -9,7 +9,7 @@ from routers.board import get_user_provision_internal
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
 from websockets_manager import manager
 from audit_logger import log_audit_event
-from services.drive_manager import background_provision_workspace, background_archive_workspace
+from services.drive_manager import background_provision_workspace, background_archive_workspace, background_relocate_workspace
 
 router = APIRouter(tags=["Tests & Assignments"])
 
@@ -412,6 +412,42 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
         t.status, t.whitebox_category, t.drive_folder_id, t.drive_folder_url, 
         test_id
     ))
+
+    cursor.execute('''
+        UPDATE tests 
+        SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, 
+            status=COALESCE(%s, status), whitebox_category=%s,
+            drive_folder_id=%s, drive_folder_url=%s
+        WHERE id=%s
+    ''', (
+        t.name, t.service_id, t.credits_per_week, t.duration_weeks, 
+        t.status, t.whitebox_category, t.drive_folder_id, t.drive_folder_url, 
+        test_id
+    ))
+
+    # 2. Trigger the Google Drive Relocation Check
+    cursor.execute("""
+        SELECT t.name, t.start_year, s.name, a.market, t.drive_folder_id 
+        FROM tests t
+        JOIN services s ON t.service_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+    
+    test_data = cursor.fetchone()
+    if test_data and test_data[4]:  # If drive_folder_id exists!
+        t_name, start_year, s_name, market, folder_id = test_data
+        if start_year: # Only move it if it's currently scheduled with a year
+            background_tasks.add_task(
+                background_relocate_workspace,
+                folder_id=folder_id,
+                year=start_year,
+                service_name=s_name,
+                market=market,
+                test_name=t_name
+            )
+            
     cursor.connection.commit()
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
