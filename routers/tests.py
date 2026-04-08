@@ -9,6 +9,7 @@ from routers.board import get_user_provision_internal
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
 from websockets_manager import manager
 from audit_logger import log_audit_event
+from services.drive_manager import background_provision_workspace, background_archive_workspace
 
 router = APIRouter(tags=["Tests & Assignments"])
 
@@ -273,6 +274,31 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
         resource_id=test_id,
         details=f"Scheduled test for Week {schedule.start_week}, {schedule.start_year}. Checked for collisions."
     )
+
+    cursor.execute("""
+        SELECT t.name, t.type, s.name, a.market, t.drive_folder_id 
+        FROM tests t
+        JOIN services s ON t.service_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+    test_data = cursor.fetchone()
+    
+    if test_data:
+        t_name, t_type, s_name, t_market, drive_id = test_data
+        target_year = payload.get('start_year')
+        
+        # Only create if it's a test, has a year, and doesn't already have a folder
+        if t_type != 'project' and target_year and not drive_id:
+            background_tasks.add_task(
+                background_provision_workspace,
+                test_id=test_id,
+                year=target_year,
+                service_name=s_name,
+                market=t_market,
+                test_name=t_name
+            )
     
     return {"message": "Scheduled and assignments validated"}
 
@@ -326,7 +352,14 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks, current_use
 @limiter.limit("5/minute")
 def delete_test(test_id: str, request: Request, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
 
-    # 1. NEW: Find all assets attached to this test and free them!
+    cursor.execute("SELECT name, drive_folder_id FROM tests WHERE id = %s", (test_id,))
+    test_data = cursor.fetchone()
+    
+    if test_data and test_data[1]:
+        # Rename it to [DELETED] in Drive
+        background_tasks.add_task(background_archive_workspace, folder_id=test_data[1], test_name=test_data[0])
+
+    # Find all assets attached to this test and free them!
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
     linked_assets = cursor.fetchall()
 
@@ -335,10 +368,10 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
     for (asset_id,) in linked_assets:
         cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (asset_id,))
     
-    # 2. NEW: Delete the links from the junction table
+    # Delete the links from the junction table
     cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (test_id,))
     
-    # 3. ORIGINAL: Delete assignments and the test itself
+    # Delete assignments and the test itself
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
     cursor.connection.commit()
