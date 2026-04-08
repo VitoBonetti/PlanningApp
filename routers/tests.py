@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timedelta
 from database import get_db_connection, get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, limiter
+from routers.board import get_user_provision_internal
 from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -198,7 +199,62 @@ def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: B
 
 @router.put("/tests/{test_id}/schedule")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    from routers.board import get_user_provision_internal
 
+    # 1. Fetch test details (duration, required credits)
+    cursor.execute("SELECT duration_weeks, credits_per_week FROM tests WHERE id = %s", (test_id,))
+    test_row = cursor.fetchone()
+    duration_weeks = int(test_row[0]) if test_row else 1
+    credits_per_week = float(test_row[1]) if test_row else 0.0
+
+    # 2. Get currently assigned users
+    cursor.execute("SELECT DISTINCT user_id FROM assignments WHERE test_id = %s", (test_id,))
+    assigned_users = [row[0] for row in cursor.fetchall()]
+
+    # 3. Delete existing assignments (clearing the "ghosts" from the old week)
+    cursor.execute("DELETE FROM assignments WHERE test_id = %s", (test_id,))
+
+    # 4. Re-assign them to the NEW week with collision handling
+    for user_id in assigned_users:
+        user_assigned_any_week = False
+        
+        for offset in range(duration_weeks):
+            target_week = schedule.start_week + offset
+            target_year = schedule.start_year
+            if target_week > 52:
+                target_week -= 52
+                target_year += 1
+
+            # Check capacity in the new week
+            provision = get_user_provision_internal(cursor, user_id, target_year, target_week)
+            cursor.execute('''
+                SELECT SUM(a.allocated_credits) FROM assignments a
+                JOIN tests t ON a.test_id = t.id
+                WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
+            ''', (user_id, target_year, target_week))
+            used = cursor.fetchone()[0] or 0.0
+            
+            available = max(0.0, provision - used)
+
+            # Only assign them if they actually have room
+            if available > 0:
+                credits_to_assign = min(available, credits_per_week)
+                cursor.execute(
+                    'INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) VALUES (%s, %s, %s, %s, %s, %s)',
+                    (str(uuid.uuid4()), test_id, user_id, target_week, target_year, credits_to_assign)
+                )
+                user_assigned_any_week = True
+
+        # If they had 0 capacity across all weeks, drop them and notify them
+        if not user_assigned_any_week:
+            notif_id = str(uuid.uuid4())
+            cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
+            tname_row = cursor.fetchone()
+            tname = tname_row[0] if tname_row else "a test"
+            cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+                           (notif_id, user_id, f"You were removed from {tname} due to a scheduling conflict.", "REMOVAL"))
+
+    # Finally, update the test location
     cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s', (schedule.start_week, schedule.start_year, "Planned", test_id))
 
     sync_raw_assets_tracking(cursor, test_id, "SCHEDULED", schedule.start_week, schedule.start_year)
@@ -215,10 +271,10 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
         action="SCHEDULE_TEST",
         resource_type="TEST",
         resource_id=test_id,
-        details=f"Scheduled test for Week {schedule.start_week}, {schedule.start_year}."
+        details=f"Scheduled test for Week {schedule.start_week}, {schedule.start_year}. Checked for collisions."
     )
     
-    return {"message": "Scheduled"}
+    return {"message": "Scheduled and assignments validated"}
 
 
 @router.put("/tests/{test_id}/unschedule")
@@ -526,56 +582,40 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
     cursor.execute('''
         SELECT a.id FROM assignments a
         JOIN tests t ON a.test_id = t.id
-        WHERE a.user_id = %s AND a.week_number = %s AND a.year = %s AND t.status != 'Unable'
-    ''', (assign.user_id, assign.week_number, assign.year))
+        WHERE a.user_id = %s AND a.week_number = %s AND a.year = %s AND a.test_id = %s AND t.status != 'Unable'
+    ''', (assign.user_id, assign.week_number, assign.year, assign.test_id))
     if cursor.fetchone():
-        raise HTTPException(status_code=400, detail="This pentester is already assigned to a test this week!")
+        raise HTTPException(status_code=400, detail="This pentester is already assigned to this test for this week!")
+
+    provision = get_user_provision_internal(cursor, assign.user_id, assign.year, assign.week_number)
     
-    # Calculate actual capacity to assign (base minus holidays)
-    cursor.execute('SELECT base_capacity, location FROM users WHERE id = %s', (assign.user_id,))
-    base_cap, user_location = cursor.fetchone()
-    cursor.execute(
-        "SELECT start_date, end_date FROM events WHERE user_id = %s OR "
-        "(event_type = 'national_holiday' AND (location = %s OR location = 'Global'))",
-        (assign.user_id, user_location)
-    )
-    events = cursor.fetchall()
+    cursor.execute('''
+        SELECT SUM(a.allocated_credits) FROM assignments a
+        JOIN tests t ON a.test_id = t.id
+        WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
+    ''', (assign.user_id, assign.year, assign.week_number))
+    used = cursor.fetchone()[0] or 0.0
     
-    week_dates = []
-    for day in range(1, 6):
-        try:
-            week_dates.append(
-                datetime.strptime(f"{assign.year}-W{assign.week_number}-{day}", "%G-W%V-%u").strftime('%Y-%m-%d'))
-        except ValueError:
-            continue
-    
-    days_off = 0
-    for s_str, e_str in events:
-        s = datetime.strptime(s_str, "%Y-%m-%d");
-        e = datetime.strptime(e_str, "%Y-%m-%d")
-        event_dates = [(s + timedelta(days=i)).strftime('%Y-%m-%d') for i in range((e - s).days + 1)]
-        days_off += sum(1 for w in week_dates if w in event_dates)
-    
-    # The actual capacity they bring to the test this week
-    actual_provided = max(0.0, base_cap - (days_off * 0.2))
+    available = max(0.0, provision - used)
     
     # Reject if capacity is 0 or less!
-    if actual_provided <= 0:
-        raise HTTPException(status_code=400,
-                            detail=f"Cannot assign: Pentester is on holiday/has 0 capacity in Week {assign.week_number}.")
+    if available <= 0:
+        raise HTTPException(status_code=400, detail=f"Cannot assign: Pentester has 0 capacity remaining in Week {assign.week_number}.")
+    
+    # Assign either the required credits, or whatever capacity they have left
+    credits_to_assign = min(available, assign.allocated_credits)
     
     new_id = str(uuid.uuid4())
     cursor.execute(
         'INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) VALUES (%s, %s, %s, %s, %s, %s)',
-        (new_id, assign.test_id, assign.user_id, assign.week_number, assign.year, actual_provided))
+        (new_id, assign.test_id, assign.user_id, assign.week_number, assign.year, credits_to_assign))
     
     cursor.execute("SELECT name FROM tests WHERE id = %s", (assign.test_id,))
     test_row = cursor.fetchone()
     if test_row:
         notif_id = str(uuid.uuid4())
         cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
-                       (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
-                        "ASSIGNMENT"))
+                       (notif_id, assign.user_id, f"You were assigned to {test_row[0]} for Week {assign.week_number}.", "ASSIGNMENT"))
 
     cursor.connection.commit()
     

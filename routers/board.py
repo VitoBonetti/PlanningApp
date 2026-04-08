@@ -76,7 +76,7 @@ def calculate_weekly_capacity(user_id, year, week_number):
 
     # Check if they are already assigned to a test this week
     cursor.execute('''
-        SELECT 1 FROM assignments a
+        SELECT SUM(a.allocated_credits) FROM assignments a
         JOIN tests t ON a.test_id = t.id
         WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
     ''', (user_id, year, week_number))
@@ -84,10 +84,11 @@ def calculate_weekly_capacity(user_id, year, week_number):
     is_assigned = cursor.fetchone() is not None
     conn.close()
 
-    # If assigned, their remaining capacity for the board is 0
+    # Their remaining capacity is their provision minus what they've already used
     if is_assigned:
         return 0.0
-    return round(provision, 1)
+
+    return max(0.0, round(provision - used, 1))
 
 
 @router.post("/events/")
