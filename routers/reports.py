@@ -39,7 +39,7 @@ def get_reports_directory(current_user: dict = Depends(get_current_user), cursor
             "market": r[9] or 'N/A'
         })
         
-    return {"documents": documents}@router.post("/reports/sync")
+    return {"documents": documents}
 
 
 @router.post("/reports/sync")
