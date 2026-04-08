@@ -200,7 +200,6 @@ def bulk_create_tests(req: BulkTestCreate, request: Request, background_tasks: B
 
 @router.put("/tests/{test_id}/schedule")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
-    from routers.board import get_user_provision_internal
 
     # 1. Fetch test details (duration, required credits)
     cursor.execute("SELECT duration_weeks, credits_per_week FROM tests WHERE id = %s", (test_id,))
@@ -289,17 +288,29 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
         t_name, t_type, s_name, t_market, drive_id = test_data
         target_year = schedule.start_year
         
-        # Only create if it's a test, has a year, and doesn't already have a folder
-        if t_type != 'project' and target_year and not drive_id:
-            background_tasks.add_task(
-                background_provision_workspace,
-                test_id=test_id,
-                year=target_year,
-                service_name=s_name,
-                market=t_market,
-                test_name=t_name
-            )
-    
+        # Only touch Drive if it's an actual test
+        if t_type != 'project' and target_year:
+            if not drive_id:
+                # 1. First time being scheduled: Create the folder
+                background_tasks.add_task(
+                    background_provision_workspace,
+                    test_id=test_id,
+                    year=target_year,
+                    service_name=s_name,
+                    market=t_market,
+                    test_name=t_name
+                )
+            else:
+                # 2. Already has a folder: Relocate it to the new Year!
+                background_tasks.add_task(
+                    background_relocate_workspace,
+                    folder_id=drive_id,
+                    year=target_year,
+                    service_name=s_name,
+                    market=t_market,
+                    test_name=t_name
+                )
+
     return {"message": "Scheduled and assignments validated"}
 
 
@@ -394,6 +405,19 @@ def delete_test(test_id: str, request: Request, background_tasks: BackgroundTask
 @router.put("/tests/{test_id}")
 @limiter.limit("10/minute")
 def update_test(test_id: str, request: Request, background_tasks: BackgroundTasks, t: TestUpdate, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+   
+    # Fetch current Drive ID BEFORE we update anything
+    cursor.execute("""
+        SELECT t.drive_folder_id, t.start_year, a.market
+        FROM tests t
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+    existing_data = cursor.fetchone()
+    drive_folder_id = existing_data[0] if existing_data else None
+    start_year = existing_data[1] if existing_data else None
+    market = existing_data[2] if existing_data else None
 
     # If an Admin forces the status back to 'Not Planned', we must clear it off the board!
     if t.status == 'Not Planned':
@@ -405,51 +429,30 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
         UPDATE tests 
         SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, 
             status=COALESCE(%s, status), whitebox_category=%s,
-            drive_folder_id=%s, drive_folder_url=%s
+            drive_folder_url=COALESCE(%s, drive_folder_url)
         WHERE id=%s
     ''', (
         t.name, t.service_id, t.credits_per_week, t.duration_weeks, 
-        t.status, t.whitebox_category, t.drive_folder_id, t.drive_folder_url, 
+        t.status, t.whitebox_category, t.drive_folder_url, 
         test_id
     ))
 
-    cursor.execute('''
-        UPDATE tests 
-        SET name=%s, service_id=%s, credits_per_week=%s, duration_weeks=%s, 
-            status=COALESCE(%s, status), whitebox_category=%s,
-            drive_folder_id=%s, drive_folder_url=%s
-        WHERE id=%s
-    ''', (
-        t.name, t.service_id, t.credits_per_week, t.duration_weeks, 
-        t.status, t.whitebox_category, t.drive_folder_id, t.drive_folder_url, 
-        test_id
-    ))
+    # Trigger Relocation (Move the Google Drive folder and all contents!)
+    if drive_folder_id and start_year:
+        # We need the NEW service name to know which folder to move it to
+        cursor.execute("SELECT name FROM services WHERE id = %s", (t.service_id,))
+        new_service_name = cursor.fetchone()[0]
 
-    # 2. Trigger the Google Drive Relocation Check
-    cursor.execute("""
-        SELECT t.name, t.start_year, s.name, a.market, t.drive_folder_id 
-        FROM tests t
-        JOIN services s ON t.service_id = s.id
-        LEFT JOIN test_assets ta ON t.id = ta.test_id
-        LEFT JOIN assets a ON ta.asset_id = a.id
-        WHERE t.id = %s LIMIT 1
-    """, (test_id,))
-    
-    test_data = cursor.fetchone()
-    if test_data and test_data[4]:  # If drive_folder_id exists!
-        t_name, start_year, s_name, market, folder_id = test_data
-        if start_year: # Only move it if it's currently scheduled with a year
-            background_tasks.add_task(
-                background_relocate_workspace,
-                folder_id=folder_id,
-                year=start_year,
-                service_name=s_name,
-                market=market,
-                test_name=t_name
-            )
-            
+        background_tasks.add_task(
+            background_relocate_workspace,
+            folder_id=drive_folder_id,
+            year=start_year,
+            service_name=new_service_name,
+            market=market,
+            test_name=t.name
+        )
+
     cursor.connection.commit()
-
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     
     background_tasks.add_task(
@@ -459,7 +462,7 @@ def update_test(test_id: str, request: Request, background_tasks: BackgroundTask
         action="UPDATE_TEST",
         resource_type="TEST",
         resource_id=test_id,
-        details=f"Updated test attributes."
+        details=f"Updated test attributes and relocated Drive folder if necessary."
     )
     
     return {"message": "Test updated successfully."}
