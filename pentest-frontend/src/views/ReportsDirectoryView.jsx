@@ -1,0 +1,131 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import axios from 'axios';
+
+const ReportsDirectoryView = () => {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await axios.get('/api/reports/directory');
+      setDocuments(res.data.documents || []);
+    } catch (error) {
+      console.error("Failed to fetch documents", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Generic Search: Checks every field for the search string
+  const filteredDocs = useMemo(() => {
+    if (!searchQuery.trim()) return documents;
+    
+    const lowerQuery = searchQuery.toLowerCase();
+    return documents.filter(doc => 
+      (doc.file_name || '').toLowerCase().includes(lowerQuery) ||
+      (doc.asset_name || '').toLowerCase().includes(lowerQuery) ||
+      (doc.test_name || '').toLowerCase().includes(lowerQuery) ||
+      (doc.service || '').toLowerCase().includes(lowerQuery) ||
+      String(doc.year || '').includes(lowerQuery)
+    );
+  }, [documents, searchQuery]);
+
+  // Helper to make file type icons
+  const getFileIcon = (mimeType) => {
+    if (mimeType.includes('pdf')) return '📕';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return '📗';
+    if (mimeType.includes('document') || mimeType.includes('word')) return '📘';
+    return '📄';
+  };
+
+  if (loading) return <div style={{ padding: '40px' }}>Loading Document Directory...</div>;
+
+  return (
+    <div style={{ padding: '24px', backgroundColor: '#f8fafc', minHeight: 'calc(100vh - 65px)' }}>
+      
+      {/* HEADER & SEARCH */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '24px', color: '#0f172a' }}>Reports Directory</h1>
+          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Search and access all centralized assessment files.</p>
+        </div>
+        
+        <input 
+          type="text" 
+          placeholder="🔍 Search files, assets, or tests..." 
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ padding: '10px 16px', border: '1px solid #cbd5e1', borderRadius: '8px', width: '300px', outline: 'none' }}
+        />
+      </div>
+
+      {/* DATA TABLE */}
+      <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+          <thead style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+            <tr>
+              <th style={{ padding: '12px 16px', color: '#475569' }}>Document</th>
+              <th style={{ padding: '12px 16px', color: '#475569' }}>Asset / Target</th>
+              <th style={{ padding: '12px 16px', color: '#475569' }}>Test Context</th>
+              <th style={{ padding: '12px 16px', color: '#475569' }}>Year</th>
+              <th style={{ padding: '12px 16px', color: '#475569', textAlign: 'right' }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredDocs.length === 0 ? (
+              <tr><td colSpan="5" style={{ padding: '24px', textAlign: 'center', color: '#94a3b8' }}>No documents match your search.</td></tr>
+            ) : (
+              filteredDocs.map(doc => (
+                <tr key={doc.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                  
+                  {/* File Name */}
+                  <td style={{ padding: '12px 16px', fontWeight: '500', color: '#1e293b' }}>
+                    <span style={{ marginRight: '8px', fontSize: '16px' }}>{getFileIcon(doc.mime_type)}</span>
+                    {doc.file_name}
+                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', marginLeft: '28px' }}>
+                      Modified: {new Date(doc.last_modified).toLocaleDateString()}
+                    </div>
+                  </td>
+
+                  {/* Asset */}
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ fontWeight: 'bold', color: '#0f172a' }}>{doc.asset_name}</div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>{doc.market}</div>
+                  </td>
+
+                  {/* Context */}
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ color: '#334155' }}>{doc.test_name}</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold' }}>{doc.service}</div>
+                  </td>
+
+                  {/* Year */}
+                  <td style={{ padding: '12px 16px', color: '#475569' }}>{doc.year || '-'}</td>
+
+                  {/* Link */}
+                  <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                    <a 
+                      href={doc.file_url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      style={{ padding: '6px 12px', backgroundColor: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: '4px', textDecoration: 'none', fontWeight: 'bold', fontSize: '12px' }}
+                    >
+                      Open File
+                    </a>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+export default ReportsDirectoryView;

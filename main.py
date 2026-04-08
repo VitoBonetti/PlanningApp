@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
-from routers import auth, users, assets, tests, board
+from routers import auth, users, assets, tests, board, reports
 from routers.auth import require_admin
 from websockets_manager import manager
 from services.importer import run_import_job
@@ -12,14 +12,17 @@ import os
 from contextlib import asynccontextmanager
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from services.drive_manager import DriveManager
 
 
 async def scheduled_sync_job():
-    print("⏰ Running automated daily sync job...")
-    
     # Run the heavy, synchronous Google Drive/DB sync in a separate thread 
     # so it doesn't freeze the WebSockets for everyone else!
+    print("⏰ Running automated daily sync job...")
     await asyncio.to_thread(run_import_job)
+
+    print("⏰ Running automated Drive Document scanner...")
+    await asyncio.to_thread(DriveManager().run_daily_document_sync)
     
     # Give the database a second to settle, then broadcast to all connected UIs
     await asyncio.sleep(2)
@@ -123,6 +126,7 @@ app.include_router(users.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
 app.include_router(tests.router, prefix="/api")
 app.include_router(board.router, prefix="/api")
+app.include_router(reports.router, prefix="/api")
 
 
 # Websocket route
