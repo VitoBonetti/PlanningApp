@@ -112,3 +112,18 @@ class WhiteboxCategoryCreate(BaseModel):
 class WhiteboxCategoryUpdate(BaseModel):
     name: str
     target_goal: int
+
+
+class MarketBase(BaseModel):
+    code: str
+    name: str
+    language: Optional[str] = None
+    region: Optional[str] = None
+    is_active: bool = True
+    description: Optional[str] = None
+
+class MarketCreate(MarketBase):
+    pass
+
+class MarketUpdate(MarketBase):
+    pass
