@@ -134,3 +134,16 @@ class MarketUpdate(MarketBase):
 class RegionSchema(BaseModel):
     regions: str
     is_active: bool = True
+
+
+class MarketAssignment(BaseModel):
+    region_id: str
+    market_role: str
+
+
+class MarketContactSchema(BaseModel):
+    name: str
+    email: str
+    platform_role: str = 'market_user'
+    is_active: bool = True
+    assignments: List[MarketAssignment] = []

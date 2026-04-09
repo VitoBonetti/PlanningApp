@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
-from routers import auth, users, assets, tests, board, reports, markets, regions
+from routers import auth, users, assets, tests, board, reports, markets, regions, market_contacts
 from routers.auth import require_admin
 from websockets_manager import manager
 from services.importer import run_import_job
@@ -129,6 +129,7 @@ app.include_router(board.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(markets.router, prefix="/api")
 app.include_router(regions.router, prefix="/api")
+app.include_router(market_contacts.router, prefix="/api")
 
 
 # Websocket route
