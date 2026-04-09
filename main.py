@@ -128,6 +128,7 @@ app.include_router(tests.router, prefix="/api")
 app.include_router(board.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(markets.router, prefix="/api")
+app.include_router(regions.router, prefix="/api")
 
 
 # Websocket route

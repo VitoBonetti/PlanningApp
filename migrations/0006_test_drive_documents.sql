@@ -1,4 +1,4 @@
-CREATE TABLE test_documents (
+CREATE TABLE IF NOT EXISTS test_documents (
     id VARCHAR(36) PRIMARY KEY,
     test_id VARCHAR(36) REFERENCES tests(id) ON DELETE CASCADE,
     drive_file_id VARCHAR(255) UNIQUE NOT NULL,

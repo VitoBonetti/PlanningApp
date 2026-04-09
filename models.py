@@ -122,8 +122,15 @@ class MarketBase(BaseModel):
     is_active: bool = True
     description: Optional[str] = None
 
+
 class MarketCreate(MarketBase):
     pass
 
+
 class MarketUpdate(MarketBase):
     pass
+
+
+class RegionSchema(BaseModel):
+    regions: str
+    is_active: bool = True
