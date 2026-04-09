@@ -14,7 +14,6 @@ def get_market_contacts(current_user: dict = Depends(get_current_user), cursor =
     if current_user.get('role') == 'pentester':
         raise HTTPException(status_code=403, detail="Access denied.")
         
-    # 1. Fetch all contacts
     cursor.execute("SELECT id, name, email, platform_role, is_active FROM market_contacts ORDER BY name")
     contacts_rows = cursor.fetchall()
     
@@ -26,18 +25,19 @@ def get_market_contacts(current_user: dict = Depends(get_current_user), cursor =
             "assignments": []
         }
         
-    # 2. Fetch all assignments and map them to the contacts
+    # Join with the markets table!
     cursor.execute("""
-        SELECT a.contact_id, a.region_id, r.regions, a.market_role 
+        SELECT a.contact_id, a.market_id, m.name, m.code, a.market_role 
         FROM market_contact_assignments a
-        JOIN regions r ON a.region_id = r.id
+        JOIN markets m ON a.market_id = m.id
     """)
     for row in cursor.fetchall():
-        contact_id, region_id, region_name, market_role = row
+        contact_id, market_id, market_name, market_code, market_role = row
         if contact_id in contacts:
             contacts[contact_id]["assignments"].append({
-                "region_id": region_id,
-                "region_name": region_name,
+                "market_id": market_id,
+                "market_name": market_name,
+                "market_code": market_code,
                 "market_role": market_role
             })
             
@@ -48,38 +48,34 @@ def get_market_contacts(current_user: dict = Depends(get_current_user), cursor =
 def create_market_contact(c: MarketContactSchema, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     contact_id = str(uuid.uuid4())
     try:
-        # 1. Insert User
         cursor.execute(
             "INSERT INTO market_contacts (id, name, email, platform_role, is_active) VALUES (%s, %s, %s, %s, %s)", 
             (contact_id, c.name, c.email, c.platform_role, c.is_active)
         )
-        # 2. Insert Assignments
         for assign in c.assignments:
             cursor.execute(
-                "INSERT INTO market_contact_assignments (id, contact_id, region_id, market_role) VALUES (%s, %s, %s, %s)",
-                (str(uuid.uuid4()), contact_id, assign.region_id, assign.market_role)
+                "INSERT INTO market_contact_assignments (id, contact_id, market_id, market_role) VALUES (%s, %s, %s, %s)",
+                (str(uuid.uuid4()), contact_id, assign.market_id, assign.market_role)
             )
         cursor.connection.commit()
         return {"id": contact_id, "message": "Contact created."}
     except Exception as e:
         cursor.connection.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error (Email might already exist). {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Database error. {str(e)}")
 
 
 @router.put("/market-contacts/{contact_id}")
 def update_market_contact(contact_id: str, c: MarketContactSchema, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     try:
-        # 1. Update User Details
         cursor.execute(
             "UPDATE market_contacts SET name=%s, email=%s, platform_role=%s, is_active=%s WHERE id=%s", 
             (c.name, c.email, c.platform_role, c.is_active, contact_id)
         )
-        # 2. Sync Assignments (Wipe old, insert new)
         cursor.execute("DELETE FROM market_contact_assignments WHERE contact_id = %s", (contact_id,))
         for assign in c.assignments:
             cursor.execute(
-                "INSERT INTO market_contact_assignments (id, contact_id, region_id, market_role) VALUES (%s, %s, %s, %s)",
-                (str(uuid.uuid4()), contact_id, assign.region_id, assign.market_role)
+                "INSERT INTO market_contact_assignments (id, contact_id, market_id, market_role) VALUES (%s, %s, %s, %s)",
+                (str(uuid.uuid4()), contact_id, assign.market_id, assign.market_role)
             )
         cursor.connection.commit()
         return {"message": "Contact updated."}

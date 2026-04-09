@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS market_contacts (
 CREATE TABLE IF NOT EXISTS market_contact_assignments (
     id VARCHAR(36) PRIMARY KEY,
     contact_id VARCHAR(36) REFERENCES market_contacts(id) ON DELETE CASCADE,
-    region_id VARCHAR(36) REFERENCES regions(id) ON DELETE CASCADE,
-    market_role VARCHAR(50) NOT NULL, 
+    market_id VARCHAR(36) REFERENCES markets(id) ON DELETE CASCADE,
+    market_role VARCHAR(50) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (contact_id, region_id, market_role) 
+    UNIQUE (contact_id, market_id, market_role)
 );

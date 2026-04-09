@@ -145,5 +145,5 @@ class MarketContactSchema(BaseModel):
     name: str
     email: str
     platform_role: str = 'market_user'
-    is_active: bool = True
+    is_active: bool = False
     assignments: List[MarketAssignment] = []
