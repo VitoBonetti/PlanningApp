@@ -257,17 +257,39 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
             "user_name": user_name
         })
 
-    cursor.execute('''SELECT id, name, service_id, credits_per_week, duration_weeks, start_week, start_year, status, whitebox_category, type, (SELECT COUNT(*) FROM test_assets WHERE test_id = tests.id), drive_folder_id, drive_folder_url FROM tests''')
+    cursor.execute('''
+        SELECT t.id, t.name, t.service_id, t.credits_per_week, t.duration_weeks, 
+               t.start_week, t.start_year, t.status, t.whitebox_category, t.type, 
+               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id), 
+               t.drive_folder_id, t.drive_folder_url,
+               tm.intake_status, tm.restitution_status, tm.checklist_state
+        FROM tests t
+        LEFT JOIN test_milestones tm ON t.id = tm.test_id
+    ''')
     all_tests = cursor.fetchall()
 
     backlog = []
     scheduled = []
     for t in all_tests:
+        # Safely parse the JSONB checklist state
+        import json
+        raw_checklist = t[15]
+        if isinstance(raw_checklist, dict):
+            parsed_checklist = raw_checklist
+        elif raw_checklist:
+            parsed_checklist = json.loads(raw_checklist)
+        else:
+            parsed_checklist = {}
+
         test_obj = {
             "id": t[0], "name": t[1], "service_id": t[2], "credits": t[3], "duration": t[4], 
             "startWeek": t[5], "startYear": t[6], "status": t[7], "whitebox_category": t[8], 
             "type": t[9], "asset_count": t[10],
-            "drive_folder_id": t[11], "drive_folder_url": t[12] 
+            "drive_folder_id": t[11], "drive_folder_url": t[12],
+            # 2. Map the new database columns into the JSON payload
+            "intake_status": t[13] or "Pending",
+            "restitution_status": t[14] or "Pending",
+            "checklist_state": parsed_checklist
         }
         if t[5] is None:
             backlog.append(test_obj)
