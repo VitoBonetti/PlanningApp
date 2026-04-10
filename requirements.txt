@@ -17,3 +17,6 @@ google-api-python-client==2.193.0
 google-auth==2.49.1
 gspread==6.2.1
 apscheduler==3.11.2
+Pillow==12.2.0
+google-cloud-storage==3.10.1
+google-cloud-pubsub==2.37.0

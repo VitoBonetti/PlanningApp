@@ -40,6 +40,8 @@ Principals:
 - Cloud SQL Client
 - Cloud SQL Instance User
 - Secret Manager Secret Accessor
+- storage.objectAdmin
+- pubsub.publisher
 
 #### Cloud Build runner Service Account
 
@@ -203,6 +205,47 @@ From **Cloudflare Dashboard** or any oher Domain provider
 Save
 
 ## 10 Load Balancer
+
+
+---
+
+## In some Point
+
+
+### Step 1: Create the Storage Bucket
+1. Go to the **Google Cloud Console** (console.cloud.google.com).
+2. In the top search bar, type **Cloud Storage** and click on **Buckets**.
+3. Click the **+ CREATE** button at the top.
+4. **Name your bucket:** Enter your globally unique name (e.g., `yourprojectid-intake-artifacts`). Click Continue.
+5. **Choose where to store your data:** Select **Region** and pick `europe-west1` (to match your current infrastructure). Click Continue.
+6. **Choose a storage class:** Leave it as Standard. Click Continue.
+7. **Choose how to control access:** Select **Uniform**. (This ensures IAM rules apply cleanly to everything inside).
+8. Click **CREATE**.
+
+### Step 2: Grant FastAPI Access to the Bucket
+1. You should now be on the details page for your newly created bucket.
+2. Click the **PERMISSIONS** tab near the top.
+3. Click the **+ GRANT ACCESS** button.
+4. In the **New principals** box, paste your exact backend service account:
+   `gcp-backend-sa@gostcontrolpanel.iam.gserviceaccount.com`
+5. In the **Select a role** dropdown, search for and select **Storage Object Admin**.
+6. Click **SAVE**.
+
+### Step 3: Create the Pub/Sub Topic
+1. In the top search bar, type **Pub/Sub** and click on **Topics**.
+2. Click the **+ CREATE TOPIC** button.
+3. **Topic ID:** Type exactly `trigger-ai-intake`.
+4. Leave the default options checked and click **CREATE**.
+
+### Step 4: Grant FastAPI Access to the Topic
+1. You should now be on the details page for your new topic (`trigger-ai-intake`).
+2. On the right-hand side of the screen, you will see an **Info Panel** with a **PERMISSIONS** tab. (If you don't see it, click "Show Info Panel" in the top right corner).
+3. Click **ADD PRINCIPAL**.
+4. In the **New principals** box, paste your backend service account again:
+   `gcp-backend-sa@gostcontrolpanel.iam.gserviceaccount.com`
+5. In the **Select a role** dropdown, search for and select **Pub/Sub Publisher**.
+6. Click **SAVE**.
+
 
 
 
