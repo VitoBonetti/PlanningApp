@@ -69,6 +69,9 @@ class TestUpdate(BaseModel):
     whitebox_category: Optional[str] = ""
     drive_folder_id: Optional[str] = None
     drive_folder_url: Optional[str] = None
+    intake_status: Optional[str] = 'Pending'
+    restitution_status: Optional[str] = 'Pending'
+    checklist_state: Optional[Dict[str, bool]] = {}
 
 
 class TestSchedule(BaseModel):
@@ -147,3 +150,9 @@ class MarketContactSchema(BaseModel):
     platform_role: str = 'market_user'
     is_active: bool = False
     assignments: List[MarketAssignment] = []
+
+
+class MilestoneUpdate(BaseModel):
+    intake_status: str
+    restitution_status: str
+    checklist_state: Dict[str, bool]
