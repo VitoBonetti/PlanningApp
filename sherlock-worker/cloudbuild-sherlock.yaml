@@ -3,6 +3,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--no-cache'
       - '-t'
       - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/sherlock-worker:$COMMIT_SHA'
       - '.'
