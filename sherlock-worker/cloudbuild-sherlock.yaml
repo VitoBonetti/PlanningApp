@@ -1,0 +1,49 @@
+steps:
+  # 1. Build the Sherlock Docker Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/sherlock-worker:$COMMIT_SHA'
+      - '.'
+    dir: 'sherlock-worker'
+
+  # 2. Push the Docker Image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/sherlock-worker:$COMMIT_SHA'
+
+  # 3. Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'sherlock-worker'
+      - '--image'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/sherlock-worker:$COMMIT_SHA'
+      - '--region'
+      - 'europe-west1'
+      - '--ingress'
+      - 'internal' # Locked inside the VPC
+      - '--no-allow-unauthenticated' # Requires IAM Token
+      - '--service-account'
+      - 'gcp-backend-sa@gostcontrolpanel.iam.gserviceaccount.com'
+      - '--network'
+      - 'gcp-vpc'
+      - '--subnet'
+      - 'gcp-vpc-subnet'
+      - '--vpc-egress'
+      - 'private-ranges-only'
+      - '--no-cpu-throttling'
+      - '--min-instances'
+      - '0' # Scale to zero when idle
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,LOCATION=europe-west1,DB_INSTANCE_NAME=gost-db,POSTGRES_DB=gost-db,IAM_SA_EMAIL=gcp-backend-sa@gostcontrolpanel.iam.gserviceaccount.com,INTAKE_BUCKET_NAME=$PROJECT_ID-gcp-intake-artifacts'
+
+images:
+  - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/sherlock-worker:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
