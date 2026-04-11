@@ -138,7 +138,19 @@ async def pubsub_trigger(request: Request):
             response = chat.send_message([sys_prompt, {"mime_type": mime, "data": file_bytes}])
 
         # 5. Parse the final JSON response
-        ai_data = json.loads(response.text.strip())
+        raw_text = response.text.strip()
+        print(f"Raw AI Output: {raw_text}") # Helpful for debugging later!
+        
+        # Strip out any markdown blocks by finding the true start and end of the JSON
+        start_idx = raw_text.find('{')
+        end_idx = raw_text.rfind('}')
+        
+        if start_idx != -1 and end_idx != -1:
+            clean_json_string = raw_text[start_idx:end_idx + 1]
+        else:
+            clean_json_string = raw_text # Fallback
+            
+        ai_data = json.loads(clean_json_string)
         
         # 6. Save to DB (VIA HTTP REQUEST TO MAIN BACKEND!)
         payload = {
