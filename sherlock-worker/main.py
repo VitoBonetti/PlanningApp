@@ -126,7 +126,7 @@ async def pubsub_trigger(request: Request):
 
         4. ABSOLUTE STOP CONDITION: If a tool returns "Not Found.", YOU MUST NOT call that tool again for the same string. Accept the null result.
 
-        Return ONLY a raw JSON object with this exact structure (no markdown tags). Use \\n\\n in the summary for paragraph breaks:
+       Return ONLY a raw JSON object with this exact structure (no markdown tags). Use \\n\\n in the summary for paragraph breaks:
         {
           "summary": "Paragraph 1: Sender & General Context.\\n\\nParagraph 2: Identified Assets & Market deductions.\\n\\nParagraph 3: Mentioned Test Details (Service, Scope, Dates, etc.).",
           "assets": [
@@ -134,7 +134,8 @@ async def pubsub_trigger(request: Request):
                "asset_id": "verified-uuid-from-db-or-null",
                "name_mentioned": "name exactly as written in the text",
                "market": "verified-market-code-or-null",
-               "confidence": <calculated_integer_score>
+               "confidence": <calculated_integer_score>,
+               "active_tests": ["Test Name 1", "Test Name 2"] # Array of test names if found, otherwise empty []
              }
           ]
         }

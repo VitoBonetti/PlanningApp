@@ -157,6 +157,7 @@ class ExtractedAsset(BaseModel):
     name_mentioned: str
     market: Optional[str]
     confidence: int
+    active_tests: Optional[List[str]] = []
 
 
 class LuigiIntakeResult(BaseModel):
