@@ -38,7 +38,7 @@ def search_asset(name: str, cursor=Depends(get_db_cursor)):
     
     # 2. Fallback to raw_asset table if not found
     if not results:
-        cursor.execute("SELECT id, name FROM raw_assets WHERE name ILIKE %s LIMIT 5", (f"%{name}%",))
+        cursor.execute("SELECT inventory_id, name FROM raw_assets WHERE name ILIKE %s LIMIT 5", (f"%{name}%",))
         results = cursor.fetchall()
         
     if not results:
