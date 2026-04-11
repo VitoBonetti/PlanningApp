@@ -21,6 +21,7 @@ def verify_iam_identity(request: Request):
 
         # VERIFY_EMAIL is your IAM_SA_EMAIL environment variable
         if email != VERIFY_EMAIL.lower():
+            print(f"🚨 DEBUG IAP MISMATCH: IAP sent '{email}', but backend expected '{VERIFY_EMAIL.lower()}'")
             raise HTTPException(status_code=403, detail=f"Unauthorized IAP Account: {email}")
         return {"email": email}
 
