@@ -1,0 +1,117 @@
+import React, { useMemo } from 'react';
+
+const modalBackdropStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, animation: 'fadeIn 0.2s ease-out' };
+const modalContentStyle = { backgroundColor: 'white', padding: '32px', borderRadius: '12px', color: '#334155', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', width: '400px', animation: 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' };
+const inputStyle = { width: '100%', padding: '8px', marginTop: '4px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' };
+
+const HolidayModal = ({ isOpen, onClose, holidayData, setHolidayData, onSave, onDelete, pentesters, currentUser }) => {
+  if (!isOpen || !holidayData) return null;
+
+  const isEditing = !!holidayData.id;
+
+  // --- LIVE CREDIT CALCULATOR ---
+  const liveCredits = useMemo(() => {
+    if (!holidayData.start_date || !holidayData.end_date) return 0;
+    
+    let workingDays = 0;
+    let d = new Date(`${holidayData.start_date}T12:00:00`);
+    const end = new Date(`${holidayData.end_date}T12:00:00`);
+    
+    while (d <= end) {
+      if (d.getDay() !== 0 && d.getDay() !== 6) workingDays++;
+      d.setDate(d.getDate() + 1);
+    }
+    if (workingDays === 0) return 0;
+
+    if (holidayData.event_type === 'national_holiday' || holidayData.event_type === 'team_day') {
+      const loc = holidayData.location || 'Global';
+      const affectedUsers = pentesters.filter(p => loc === 'Global' || p.location === loc);
+      let totalDailyCap = 0;
+      affectedUsers.forEach(p => {
+         const c = Number(p.capacity !== undefined ? p.capacity : (p.base_capacity || 1.0));
+         totalDailyCap += (c / 5);
+      });
+      return (workingDays * totalDailyCap).toFixed(1);
+    }
+
+    if (!holidayData.user_id) return 0;
+    const user = pentesters.find(p => p.id === holidayData.user_id);
+    if (!user) return 0;
+
+    const baseCap = Number(user.capacity !== undefined ? user.capacity : (user.base_capacity || 1.0));
+    return (workingDays * (baseCap / 5)).toFixed(1);
+  }, [holidayData, pentesters]);
+
+  return (
+    <div style={modalBackdropStyle}>
+      <div style={modalContentStyle}>
+        <h2 style={{ margin: '0 0 20px 0', color: '#0f172a' }}>
+          {isEditing ? 'Edit Event' : 'Add Time Off'}
+        </h2>
+        
+        <form onSubmit={(e) => { e.preventDefault(); onSave(); }} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          
+          <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Event Type:
+            <select required style={inputStyle} value={holidayData.event_type} onChange={e => setHolidayData({...holidayData, event_type: e.target.value})}>
+              <option value="personal_holiday">Personal Holiday</option>
+              {currentUser?.role === 'admin' && <option value="national_holiday">National Holiday</option>}
+              {currentUser?.role === 'admin' && <option value="team_day">Team Day</option>}
+            </select>
+          </label>
+
+          {holidayData.event_type === 'personal_holiday' && (
+            <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Team Member:
+              <select 
+                required 
+                style={{...inputStyle, backgroundColor: currentUser?.role !== 'admin' ? '#f1f5f9' : 'white'}} 
+                value={holidayData.user_id} 
+                onChange={e => setHolidayData({...holidayData, user_id: e.target.value})}
+                disabled={currentUser?.role !== 'admin'} // <-- NEW: Locks the dropdown for non-admins!
+              >
+                <option value="">Select User...</option>
+                {pentesters.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+          )}
+
+          {holidayData.event_type === 'national_holiday' && (
+            <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Location:
+              <select style={inputStyle} value={holidayData.location} onChange={e => setHolidayData({...holidayData, location: e.target.value})}>
+                <option value="Global">Global</option>
+                <option value="Netherlands">Netherlands</option>
+                <option value="Portugal">Portugal</option>
+              </select>
+            </label>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <label style={{ flex: 1, fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Start Date:
+              <input type="date" required style={inputStyle} value={holidayData.start_date} onChange={e => setHolidayData({...holidayData, start_date: e.target.value})} />
+            </label>
+            <label style={{ flex: 1, fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>End Date:
+              <input type="date" required style={inputStyle} value={holidayData.end_date} onChange={e => setHolidayData({...holidayData, end_date: e.target.value})} />
+            </label>
+          </div>
+
+          {/* Live Credit Impact Preview */}
+          <div style={{ padding: '10px', backgroundColor: '#f1f5f9', borderRadius: '6px', fontSize: '13px', color: '#475569', textAlign: 'center', fontWeight: 'bold' }}>
+            Estimated Impact: <span style={{ color: liveCredits > 0 ? '#b91c1c' : '#047857' }}>-{liveCredits} Credits</span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px' }}>
+            {isEditing ? (
+              <button type="button" className="btn-danger" onClick={() => onDelete(holidayData.id)}>Delete</button>
+            ) : <div />} {/* Empty div for flex spacing if not editing */}
+            
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn-primary">Save</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default HolidayModal;

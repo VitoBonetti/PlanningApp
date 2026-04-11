@@ -1,0 +1,74 @@
+import React from 'react';
+
+// Reusable inline styles for the modal
+const modalBackdropStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, animation: 'fadeIn 0.2s ease-out' };
+// FIX: Changed width from 400px to 600px so labels fit beautifully on one line
+const modalContentStyle = { backgroundColor: 'white', padding: '32px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' };
+const inputStyle = { width: '100%', padding: '10px', marginTop: '4px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box', outline: 'none', transition: 'border 0.2s' };
+
+const MarketModal = ({ 
+  showMarketModal, 
+  setShowMarketModal, 
+  editingMarket, 
+  setEditingMarket, 
+  handleMarketSubmit,
+  activeRegions
+}) => {
+  if (!showMarketModal || !editingMarket) return null;
+
+  return (
+    <div style={modalBackdropStyle}>
+      <div style={modalContentStyle}>
+        <h2 style={{ margin: '0 0 20px 0', color: '#0f172a' }}>{editingMarket.id ? 'Edit Market' : 'Add New Market'}</h2>
+        
+        <form onSubmit={handleMarketSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
+          <div style={{ display: 'flex', gap: '16px' }}>
+            <label style={{ flex: 1, fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Market Code (e.g. US, DE):
+              <input required style={inputStyle} value={editingMarket.code} onChange={e => setEditingMarket({...editingMarket, code: e.target.value.toUpperCase()})} placeholder="US" disabled={!!editingMarket.id} title={editingMarket.id ? "Code cannot be changed once created" : ""} />
+            </label>
+            <label style={{ flex: 2, fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Full Name:
+              <input required style={inputStyle} value={editingMarket.name} onChange={e => setEditingMarket({...editingMarket, name: e.target.value})} placeholder="United States" />
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', gap: '16px' }}>
+            <label style={{ flex: 1, fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Region:
+            <select 
+              style={inputStyle} 
+              value={editingMarket.region || ''} 
+              onChange={e => setEditingMarket({...editingMarket, region: e.target.value})}
+              required
+            >
+              <option value="" disabled>Select a Region...</option>
+              {/* Map over the regions from the database! */}
+              {activeRegions?.map(r => (
+                <option key={r.id} value={r.regions}>{r.regions}</option>
+              ))}
+            </select>
+          </label>
+            <label style={{ flex: 1, fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Language:
+              <input style={inputStyle} value={editingMarket.language || ''} onChange={e => setEditingMarket({...editingMarket, language: e.target.value})} placeholder="English" />
+            </label>
+          </div>
+
+          <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>Description (Optional):
+            <textarea style={{ width: '100%', padding: '10px', marginTop: '4px', border: '1px solid #cbd5e1', borderRadius: '6px', minHeight: '60px', resize: 'vertical', outline: 'none' }} value={editingMarket.description || ''} onChange={e => setEditingMarket({...editingMarket, description: e.target.value})} placeholder="Internal notes about this market..." />
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#1e293b', cursor: 'pointer', marginTop: '8px' }}>
+            <input type="checkbox" checked={editingMarket.is_active} onChange={e => setEditingMarket({...editingMarket, is_active: e.target.checked})} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+            <strong>Market is Active</strong>
+          </label>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+            <button type="button" className="btn-secondary" onClick={() => setShowMarketModal(false)}>Cancel</button>
+            <button type="submit" className="btn-primary">Save Market</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default MarketModal;
