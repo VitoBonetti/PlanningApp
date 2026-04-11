@@ -9,7 +9,8 @@ from database import get_db_cursor
 from models import ExtractedAsset, LuigiIntakeResult
 
 
-VERIFY_EMAIL = os.environ.get("IAM_SA_EMAIL")
+SA_EMAIL = os.environ.get("SA_EMAIL")
+
 router = APIRouter(tags=["Intake Luigi"])
 
 def verify_iam_identity(request: Request):
@@ -19,16 +20,14 @@ def verify_iam_identity(request: Request):
         # IAP format is usually "accounts.google.com:email@address.com"
         email = iap_email_header.split(":")[-1].lower()
 
-        # VERIFY_EMAIL is your IAM_SA_EMAIL environment variable
-        if email != VERIFY_EMAIL.lower():
-            print(f"🚨 DEBUG IAP MISMATCH: IAP sent '{email}', but backend expected '{VERIFY_EMAIL.lower()}'")
+        # SA_EMAIL is your SA_EMAIL environment variable
+        if email != SA_EMAIL.lower():
+            print(f"🚨 DEBUG IAP MISMATCH: IAP sent '{email}', but backend expected '{SA_EMAIL.lower()}'")
             raise HTTPException(status_code=403, detail=f"Unauthorized IAP Account: {email}")
         return {"email": email}
 
 
-# ==========================================
-# 1. The Search Endpoints (Used by Gemini Tools)
-# ==========================================
+#  The Search Endpoints (Used by Gemini Tools)
 
 @router.get("/search-asset", dependencies=[Depends(verify_iam_identity)])
 def search_asset(name: str, cursor=Depends(get_db_cursor)):
