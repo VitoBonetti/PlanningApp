@@ -1,7 +1,7 @@
 import os
 import uuid
 import io
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks, Response
 from pydantic import BaseModel
 from google.cloud import storage, pubsub_v1
 import json
@@ -157,13 +157,86 @@ def get_intake_queue(current_user: dict = Depends(require_admin), cursor = Depen
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+# --- Helper Function for Background Deletion ---
+def delete_gcs_blob(file_path: str):
+    if os.environ.get("ENV") == "local" or not file_path:
+        return
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(file_path)
+        if blob.exists():
+            blob.delete()
+            print(f"🗑️ Cleaned up discarded artifact from GCS: {file_path}")
+    except Exception as e:
+        print(f"🚨 Failed to delete {file_path} from GCS: {e}")
+
+
 @router.delete("/intake/{note_id}")
-def discard_intake_note(note_id: str, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
-    """Marks a note as discarded (GCS file deletion will be handled by a background cron job to keep the UI fast)."""
-    cursor.execute("UPDATE intake_notes SET status = 'DISCARDED' WHERE id = %s RETURNING id", (note_id,))
-    if not cursor.fetchone():
+def discard_intake_note(
+        note_id: str,
+        background_tasks: BackgroundTasks,
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    """Marks a note as discarded and permanently deletes the file from the GCS bucket."""
+
+    # 1. Get the file path before we discard it
+    cursor.execute("SELECT file_path FROM intake_notes WHERE id = %s", (note_id,))
+    row = cursor.fetchone()
+    if not row:
         raise HTTPException(status_code=404, detail="Note not found")
 
+    file_path = row[0]
+
+    # 2. Mark as discarded in DB
+    cursor.execute("UPDATE intake_notes SET status = 'DISCARDED' WHERE id = %s RETURNING id", (note_id,))
     cursor.connection.commit()
 
-    return {"message": "Note discarded successfully."}
+    # 3. Trigger GCS deletion in the background so the UI stays fast
+    background_tasks.add_task(delete_gcs_blob, file_path)
+
+    return {"message": "Note discarded successfully and bucket cleanup queued."}
+
+
+@router.get("/intake/file/{note_id}")
+def get_intake_file(note_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """Fetches the raw file bytes from GCS so the frontend can preview it."""
+
+    cursor.execute("SELECT file_path, source_type FROM intake_notes WHERE id = %s", (note_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    file_path, source_type = row[0], row[1]
+
+    if source_type == 'TEXT' or not file_path:
+        raise HTTPException(status_code=400, detail="This note does not have a downloadable file attached.")
+
+    if os.environ.get("ENV") == "local":
+        raise HTTPException(status_code=501, detail="File previews not available in local dev without GCS.")
+
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(file_path)
+
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="File physically missing from bucket.")
+
+        file_bytes = blob.download_as_bytes()
+
+        # Determine the correct MIME type for the browser
+        mime_type = "application/octet-stream"
+        if file_path.lower().endswith(".pdf"):
+            mime_type = "application/pdf"
+        elif file_path.lower().endswith(".png"):
+            mime_type = "image/png"
+        elif file_path.lower().endswith(".jpg") or file_path.lower().endswith(".jpeg"):
+            mime_type = "image/jpeg"
+
+        return Response(content=file_bytes, media_type=mime_type)
+
+    except Exception as e:
+        print(f"GCS Download Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve file from bucket.")
