@@ -151,13 +151,19 @@ class MarketContactSchema(BaseModel):
     is_active: bool = False
     assignments: List[MarketAssignment] = []
 
+class ActiveTestSummary(BaseModel):
+    name: str
+    service_name: Optional[str] = None
+    start_week: Optional[int] = None
+    start_year: Optional[int] = None
+
 
 class ExtractedAsset(BaseModel):
     asset_id: Optional[str]
     name_mentioned: str
     market: Optional[str]
     confidence: int
-    active_tests: Optional[List[str]] = []
+    active_tests: Optional[List[ActiveTestSummary]] = []
 
 
 class LuigiIntakeResult(BaseModel):

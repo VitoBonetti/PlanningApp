@@ -135,7 +135,14 @@ async def pubsub_trigger(request: Request):
                "name_mentioned": "name exactly as written in the text",
                "market": "verified-market-code-or-null",
                "confidence": <calculated_integer_score>,
-               "active_tests": ["Test Name 1", "Test Name 2"] # Array of test names if found, otherwise empty []
+               "active_tests": [
+                   {
+                       "name": "Test Name",
+                       "service_name": "Web App Pentest",
+                       "start_week": 14,
+                       "start_year": 2024
+                   }
+               ] # Array of objects if tests are found, otherwise empty []
              }
           ]
         }
