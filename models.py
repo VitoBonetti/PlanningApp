@@ -140,7 +140,7 @@ class RegionSchema(BaseModel):
 
 
 class MarketAssignment(BaseModel):
-    region_id: str
+    market_id: str
     market_role: str
 
 
