@@ -158,9 +158,13 @@ async def pubsub_trigger(request: Request):
 
         5. ABSOLUTE STOP CONDITION: If a tool returns "Not Found", YOU MUST NOT call that tool again. Accept the null result.
 
-        Return ONLY a raw JSON object with this exact structure (no markdown tags). Use \\n\\n in the summary for paragraph breaks:
+       6. FORMATTING THE SUMMARY:
+           - You MUST break the `summary` string into highly readable paragraphs using the literal characters `\n\n`.
+           - Start each paragraph with a clear text label indicating the section.
+        
+        Return ONLY a raw JSON object with this exact structure (no markdown tags):
         {
-          "summary": "Paragraph 1: Sender & Context.\\n\\nParagraph 2: Assets & Markets.\\n\\nParagraph 3: Existing Test Details.\\n\\nParagraph 4: Agent Proposal (Capacity availability based on your checks).",
+          "summary": "CONTEXT: Sender & General Context.\\n\\nASSETS & MARKETS: Identified Assets & Market deductions.\\n\\nTEST DETAILS: Existing Test Details.\\n\\nAGENT PROPOSAL: Capacity availability based on your checks.",
           "assets": [
              {
                "asset_id": "verified-uuid-from-db-or-null",
