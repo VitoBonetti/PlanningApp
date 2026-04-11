@@ -8,10 +8,10 @@ from google.auth.transport import requests
 from database import get_db_cursor 
 from models import ExtractedAsset, LuigiIntakeResult
 
-
 SA_EMAIL = os.environ.get("SA_EMAIL")
 
 router = APIRouter(tags=["Intake Luigi"])
+
 
 def verify_iam_identity(request: Request):
     iap_email_header = request.headers.get("x-goog-authenticated-user-email")
@@ -39,24 +39,26 @@ def verify_iam_identity(request: Request):
 
 
 #  endpoint used by luigi
-
 @router.get("/search-asset", dependencies=[Depends(verify_iam_identity)])
 def search_asset(name: str, cursor=Depends(get_db_cursor)):
-    """Searches assets and raw_asset tables."""
+    """Searches both verified assets and raw_assets simultaneously for the AI."""
+
     # 1. Check primary assets table
-    cursor.execute("SELECT id, name FROM assets WHERE name ILIKE %s LIMIT 5", (f"%{name}%",))
-    results = cursor.fetchall()
-    
-    # 2. Fallback to raw_asset table if not found
-    if not results:
-        cursor.execute("SELECT inventory_id, name FROM raw_assets WHERE name ILIKE %s LIMIT 5", (f"%{name}%",))
-        results = cursor.fetchall()
-        
-    if not results:
-        raise HTTPException(status_code=404, detail="Not Found")
-        
-    # pg8000 returns tuples, we map them to a list of dicts
-    return [{"id": r[0], "name": r[1]} for r in results]
+    cursor.execute("SELECT id, name FROM assets WHERE name ILIKE %s LIMIT 3", (f"%{name}%",))
+    verified_results = [{"id": r[0], "name": r[1], "type": "VERIFIED"} for r in cursor.fetchall()]
+
+    # 2. Check raw_asset table
+    cursor.execute("SELECT inventory_id, name FROM raw_assets WHERE name ILIKE %s LIMIT 3", (f"%{name}%",))
+    raw_results = [{"id": r[0], "name": r[1], "type": "RAW"} for r in cursor.fetchall()]
+
+    # Combine results
+    combined = verified_results + raw_results
+
+    if not combined:
+        raise HTTPException(status_code=404, detail="Not Found.")
+
+    return combined
+
 
 @router.get("/search-market", dependencies=[Depends(verify_iam_identity)])
 def search_market(query: str, cursor=Depends(get_db_cursor)):
@@ -70,6 +72,7 @@ def search_market(query: str, cursor=Depends(get_db_cursor)):
         return {"code": result[0], "name": result[1]}
     
     raise HTTPException(status_code=404, detail="Market Not Found")
+
 
 @router.get("/search-contact", dependencies=[Depends(verify_iam_identity)])
 def search_contact(name: str, cursor=Depends(get_db_cursor)):
