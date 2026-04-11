@@ -78,6 +78,28 @@ def check_asset_tests(asset_id: str) -> str:
     res = requests.get(url, params={"asset_id": asset_id}, headers=headers)
     return res.text if res.status_code == 200 else "No active tests found for this asset."
 
+def get_all_valid_markets() -> str:
+    """Returns the full list of all active markets and their codes. Use this to find unconventional markets."""
+    url = f"{MAIN_BACKEND_URL}/api/all-markets"
+    headers = {"Authorization": f"Bearer {get_iam_token()}"}
+    res = requests.get(url, headers=headers)
+    return res.text if res.status_code == 200 else "[]"
+
+
+def check_service_capacity(service_name: str, quarter: int, year: int) -> str:
+    """
+    Checks the planning system for available weeks.
+    Args:
+        service_name: The requested service (e.g., "Blackbox", "Whitebox").
+        quarter: integer 1, 2, 3, or 4.
+        year: integer year (e.g., 2026).
+    Returns: JSON with available weeks for that service in that quarter.
+    """
+    url = f"{MAIN_BACKEND_URL}/api/check-capacity"
+    headers = {"Authorization": f"Bearer {get_iam_token()}"}
+    res = requests.get(url, params={"service_name": service_name, "quarter": quarter, "year": year}, headers=headers)
+    return res.text if res.status_code == 200 else "Could not check capacity."
+
 # main logic trigger
 
 @app.post("/")
@@ -102,47 +124,46 @@ async def pubsub_trigger(request: Request):
         # 2. Setup Gemini 1.5 Pro with Tools
         genai.configure(api_key=get_gemini_key())
         
-        ai_tools = [search_asset, search_market, search_market_by_contact, check_asset_tests]
+        ai_tools = [search_asset, search_market, search_market_by_contact, check_asset_tests, get_all_valid_markets, check_service_capacity]
         model = genai.GenerativeModel('gemini-2.5-pro', tools=ai_tools)
 
         # 3. The System Prompt
         sys_prompt = """
-        You are a highly intelligent Cybersecurity Operations agent. Your job is to extract pentest request data and enrich it using your database tools.
+        You are a highly intelligent Cybersecurity Operations agent. Your job is to extract pentest request data, cross-reference it with the database, and proactively propose planning schedules.
 
         CRITICAL RULES & LOGIC FLOW:
-        1. Context Extraction: Identify the SENDER of the request, the target ASSETS/SOFTWARE, and any TEST DETAILS mentioned (e.g., service type, dates, scope, environments). Do NOT search the database for the sender's name.
+        1. Context & Asset Extraction: Identify SENDER, ASSETS (including RITMs), and TEST DETAILS. Use `search_asset` which can match names OR RITM numbers.
 
-        2. Asset Lookup Flow:
-           - Call `search_asset` for any identified software. The tool returns matches labeled as "VERIFIED" or "RAW".
-           - IF VERIFIED: Immediately search for the associated Market. 
-           - IF RAW (or if a verified asset lacks market context): Use the raw asset names/data to help deduce context and calculate your confidence.
-           - SKIP TESTS FOR RAW: Do NOT call `check_asset_tests` if the asset was only found as a "RAW" type. Raw assets do not have active tests.
+        2. Market Mapping: Do NOT assume market codes based on standard geography. ALWAYS call `get_all_valid_markets` to see the exact valid markets available in the system, and map the text to one of those options.
 
-        3. Dynamic Confidence Scoring:
-           - 90-100: Exact match found in VERIFIED assets.
-           - 70-89: Partial/fuzzy match in VERIFIED assets.
-           - 40-69: Match found ONLY in RAW assets.
-           - 0-39: No database match, relying solely on text deduction.
+        3. Proactive Capacity Planning (Agent Proposal):
+           - If the text mentions a target timeframe (e.g., Q2 2026, Q3 2026) AND a service (Whitebox, Blackbox, Adversary Simulation), you MUST call `check_service_capacity`.
+           - Pass the service string, the quarter (1-4), and the year to the tool.
+           - Use the tool's result to write a distinct 'Agent Proposal' paragraph in your summary.
+             * Example A: "Agent Proposal: For the Blackbox test in Q3 2026, there is enough space to plan the test (available in more than 4 weeks)."
+             * Example B: "Agent Proposal: For the Whitebox test in Q2 2026, possible space is available in weeks 16, 17, and 21."
+             * Example C: "Agent Proposal: For the Whitebox test in Q2 2026, there is currently no capacity available."
 
-        4. ABSOLUTE STOP CONDITION: If a tool returns "Not Found.", YOU MUST NOT call that tool again for the same string. Accept the null result.
+        4. Dynamic Confidence Scoring (Reflects your certainty that this is the target asset):
+           - 85-100: Exact match in VERIFIED assets, OR the text is extremely clear and you successfully verified the Market.
+           - 70-84: Fuzzy match in VERIFIED DB, OR it is clearly an asset but the Market is missing.
+           - 40-69: Match found ONLY in RAW assets, OR you are guessing based on vague context.
+           - 0-39: Very vague mention, highly unsure if it is actually an in-scope asset.
 
-       Return ONLY a raw JSON object with this exact structure (no markdown tags). Use \\n\\n in the summary for paragraph breaks:
+        5. ABSOLUTE STOP CONDITION: If a tool returns "Not Found", YOU MUST NOT call that tool again. Accept the null result.
+
+        Return ONLY a raw JSON object with this exact structure (no markdown tags). Use \\n\\n in the summary for paragraph breaks:
         {
-          "summary": "Paragraph 1: Sender & General Context.\\n\\nParagraph 2: Identified Assets & Market deductions.\\n\\nParagraph 3: Mentioned Test Details (Service, Scope, Dates, etc.).",
+          "summary": "Paragraph 1: Sender & Context.\\n\\nParagraph 2: Assets & Markets.\\n\\nParagraph 3: Existing Test Details.\\n\\nParagraph 4: Agent Proposal (Capacity availability based on your checks).",
           "assets": [
              {
                "asset_id": "verified-uuid-from-db-or-null",
                "name_mentioned": "name exactly as written in the text",
                "market": "verified-market-code-or-null",
-               "confidence": <calculated_integer_score>,
+               "confidence": <integer>,
                "active_tests": [
-                   {
-                       "name": "Test Name",
-                       "service_name": "Web App Pentest",
-                       "start_week": 14,
-                       "start_year": 2024
-                   }
-               ] # Array of objects if tests are found, otherwise empty []
+                   { "name": "Name", "service_name": "Service", "start_week": 14, "start_year": 2024 }
+               ] 
              }
           ]
         }

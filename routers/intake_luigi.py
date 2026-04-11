@@ -48,7 +48,8 @@ def search_asset(name: str, cursor=Depends(get_db_cursor)):
     verified_results = [{"id": r[0], "name": r[1], "type": "VERIFIED"} for r in cursor.fetchall()]
 
     # 2. Check raw_asset table
-    cursor.execute("SELECT inventory_id, name FROM raw_assets WHERE name ILIKE %s LIMIT 3", (f"%{name}%",))
+    cursor.execute("SELECT inventory_id, name FROM raw_assets WHERE name ILIKE %s OR number ILIKE %s LIMIT 3",
+                   (f"%{name}%", f"%{name}%"))
     raw_results = [{"id": r[0], "name": r[1], "type": "RAW"} for r in cursor.fetchall()]
 
     # Combine results
@@ -167,3 +168,68 @@ def complete_intake(result: LuigiIntakeResult, cursor=Depends(get_db_cursor)):
     cursor.connection.commit()
 
     return {"status": "success"}
+
+
+@router.get("/all-markets", dependencies=[Depends(verify_iam_identity)])
+def get_all_markets(cursor=Depends(get_db_cursor)):
+    """Returns all active markets so the AI doesn't have to guess country codes."""
+    cursor.execute("SELECT code, name FROM markets WHERE is_active = TRUE")
+    return [{"code": r[0], "name": r[1]} for r in cursor.fetchall()]
+
+
+@router.get("/check-capacity", dependencies=[Depends(verify_iam_identity)])
+def check_capacity(service_name: str, quarter: int, year: int, cursor=Depends(get_db_cursor)):
+    """Calculates available weeks in a quarter based on service type."""
+
+    # 1. Find the service (handling spaces flexibly)
+    service_query = service_name.replace(" ", "%")
+    cursor.execute("SELECT id, name, max_concurrent_per_week FROM services WHERE name ILIKE %s LIMIT 1",
+                   (f"%{service_query}%",))
+    service = cursor.fetchone()
+
+    if not service:
+        return {"error": f"Service matching '{service_name}' not found in DB."}
+
+    service_id, s_name, max_concurrent = service
+    is_blackbox = "blackbox" in s_name.lower() or "black box" in s_name.lower()
+
+    # 2. Calculate week boundaries for the quarter
+    q_start = (quarter - 1) * 13 + 1
+    q_end = quarter * 13 if quarter < 4 else 52
+
+    available_weeks = []
+
+    # 3. Calculate Availability
+    for w in range(q_start, q_end + 1):
+        if is_blackbox:
+            # Blackbox Logic: Concurrency limit from services table
+            cursor.execute("""
+                SELECT COUNT(*) FROM tests 
+                WHERE service_id = %s 
+                AND status NOT IN ('Completed', 'Discarded', 'Not Planned')
+                AND start_year = %s
+                AND %s >= start_week AND %s < (start_week + duration_weeks)
+            """, (service_id, year, w, w))
+            count = cursor.fetchone()[0]
+
+            if count < (max_concurrent or 999):
+                available_weeks.append(w)
+        else:
+            # Whitebox/Adversary Logic: 1.0 Credit availability rule
+            cursor.execute("""
+                SELECT COALESCE(SUM(base_capacity), 0) FROM users 
+                WHERE (start_year < %s OR (start_year = %s AND start_week <= %s))
+                AND (end_year IS NULL OR end_year > %s OR (end_year = %s AND end_week >= %s))
+            """, (year, year, w, year, year, w))
+            total_cap = cursor.fetchone()[0]
+
+            cursor.execute("""
+                SELECT COALESCE(SUM(allocated_credits), 0) FROM assignments 
+                WHERE year = %s AND week_number = %s
+            """, (year, w))
+            used_cap = cursor.fetchone()[0]
+
+            if (total_cap - used_cap) >= 1.0:
+                available_weeks.append(w)
+
+    return {"service_identified": s_name, "available_weeks": available_weeks}
