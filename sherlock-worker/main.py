@@ -159,12 +159,16 @@ async def pubsub_trigger(request: Request):
         5. ABSOLUTE STOP CONDITION: If a tool returns "Not Found", YOU MUST NOT call that tool again. Accept the null result.
 
        6. FORMATTING THE SUMMARY:
-           - You MUST break the `summary` string into highly readable paragraphs using the literal characters `\n\n`.
-           - Start each paragraph with a clear text label indicating the section.
+           - You MUST use the `summary_sections` object to divide your thoughts. Do NOT write a single paragraph.
         
-        Return ONLY a raw JSON object with this exact structure (no markdown tags):
+       Return ONLY a raw JSON object with this exact structure (no markdown tags):
         {
-          "summary": "CONTEXT: Sender & General Context.\\n\\nASSETS & MARKETS: Identified Assets & Market deductions.\\n\\nTEST DETAILS: Existing Test Details.\\n\\nAGENT PROPOSAL: Capacity availability based on your checks.",
+          "summary_sections": {
+              "context": "Sender & General Context.",
+              "assets_and_markets": "Identified Assets & Market deductions.",
+              "test_details": "Existing Test Details.",
+              "agent_proposal": "Capacity availability based on your checks."
+          },
           "assets": [
              {
                "asset_id": "verified-uuid-from-db-or-null",
@@ -202,11 +206,19 @@ async def pubsub_trigger(request: Request):
             clean_json_string = raw_text # Fallback
             
         ai_data = json.loads(clean_json_string)
+
+        sections = ai_data.get("summary_sections", {})
+        final_summary = (
+            f"CONTEXT:\n{sections.get('context', 'None')}\n\n"
+            f"ASSETS & MARKETS:\n{sections.get('assets_and_markets', 'None')}\n\n"
+            f"TEST DETAILS:\n{sections.get('test_details', 'None')}\n\n"
+            f"AGENT PROPOSAL:\n{sections.get('agent_proposal', 'None')}"
+        )
         
         # 6. Save to DB (VIA HTTP REQUEST TO MAIN BACKEND!)
         payload = {
             "note_id": note_id,
-            "summary": ai_data.get("summary", "Analysis complete."),
+            "summary": final_summary.strip(),
             "assets": ai_data.get("assets", [])
         }
         

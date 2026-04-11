@@ -322,7 +322,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response, current_use
         "whitebox_categories": wb_categories
     }
 
-
+# NOT SURE THE RIGHT PLACE IS THIS - START #
 @router.post("/categories/whitebox")
 def create_wb_category(cat: WhiteboxCategoryCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin)):
     conn = get_db_connection()
@@ -361,7 +361,7 @@ def delete_wb_category(cat_id: str, background_tasks: BackgroundTasks, current_u
     conn.close()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Category deleted"}
-
+# NOT SURE THE RIGHT PLACE IS THIS - END #
 
 @router.delete("/system/wipe")
 @limiter.limit("1/minute")

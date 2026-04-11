@@ -8,6 +8,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 from database import get_db_cursor 
 from models import ExtractedAsset, LuigiIntakeResult
+from routers.board import get_user_provision_internal
 
 SA_EMAIL = os.environ.get("SA_EMAIL")
 
@@ -231,20 +232,31 @@ def check_capacity(service_name: str, quarter: int, year: int, cursor=Depends(ge
                 available_weeks.append(w)
         else:
             # Whitebox/Adversary Logic: 1.0 Credit availability rule
-            cursor.execute("""
-                SELECT COALESCE(SUM(base_capacity), 0) FROM users 
-                WHERE (start_year < %s OR (start_year = %s AND start_week <= %s))
-                AND (end_year IS NULL OR end_year > %s OR (end_year = %s AND end_week >= %s))
-            """, (year, year, w, year, year, w))
-            total_cap = cursor.fetchone()[0]
+            cursor.execute("SELECT id FROM users")
+            all_users = cursor.fetchall()
 
-            cursor.execute("""
-                SELECT COALESCE(SUM(allocated_credits), 0) FROM assignments 
-                WHERE year = %s AND week_number = %s
-            """, (year, w))
-            used_cap = cursor.fetchone()[0]
+            total_team_remaining = 0.0
 
-            if (total_cap - used_cap) > 1.0:
+            for (u_id,) in all_users:
+                # 1. Get exact provision for this specific user (handles holidays & start dates)
+                provision = get_user_provision_internal(cursor, u_id, year, w)
+
+                # 2. Deduct tests they are already assigned to
+                cursor.execute('''
+                    SELECT SUM(COALESCE(a.allocated_credits, u.base_capacity)) 
+                    FROM assignments a
+                    JOIN tests t ON a.test_id = t.id
+                    JOIN users u ON a.user_id = u.id
+                    WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
+                ''', (u_id, year, w))
+
+                used = cursor.fetchone()[0] or 0.0
+
+                # 3. Add their remaining capacity to the team's total pool
+                total_team_remaining += max(0.0, round(provision - used, 1))
+
+            # If the TEAM has strictly more than 1.0 credit left, propose it
+            if total_team_remaining > 1.0:
                 available_weeks.append(w)
 
     return {"service_identified": s_name, "available_weeks": available_weeks}
