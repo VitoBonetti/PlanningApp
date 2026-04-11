@@ -1,5 +1,6 @@
 import os
 import json
+import datetime
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from pydantic import BaseModel
 from typing import List, Optional
@@ -206,8 +207,15 @@ def check_capacity(service_name: str, quarter: int, year: int, cursor=Depends(ge
 
     available_weeks = []
 
+    today = datetime.date.today()
+    current_year, current_week, _ = today.isocalendar()
+
     # 3. Calculate Availability
     for w in range(q_start, q_end + 1):
+
+        if year < current_year or (year == current_year and w <= current_week):
+            continue
+
         if is_blackbox:
             # Blackbox Logic: Concurrency limit from services table
             cursor.execute("""
@@ -236,7 +244,7 @@ def check_capacity(service_name: str, quarter: int, year: int, cursor=Depends(ge
             """, (year, w))
             used_cap = cursor.fetchone()[0]
 
-            if (total_cap - used_cap) >= 1.0:
+            if (total_cap - used_cap) > 1.0:
                 available_weeks.append(w)
 
     return {"service_identified": s_name, "available_weeks": available_weeks}
