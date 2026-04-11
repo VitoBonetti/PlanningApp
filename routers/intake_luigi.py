@@ -38,7 +38,7 @@ def search_asset(name: str, cursor=Depends(get_db_cursor)):
     
     # 2. Fallback to raw_asset table if not found
     if not results:
-        cursor.execute("SELECT id, name FROM raw_asset WHERE name ILIKE %s LIMIT 5", (f"%{name}%",))
+        cursor.execute("SELECT id, name FROM raw_assets WHERE name ILIKE %s LIMIT 5", (f"%{name}%",))
         results = cursor.fetchall()
         
     if not results:
@@ -62,26 +62,49 @@ def search_market(query: str, cursor=Depends(get_db_cursor)):
 
 @router.get("/search-contact", dependencies=[Depends(verify_iam_identity)])
 def search_contact(name: str, cursor=Depends(get_db_cursor)):
-    """Searches market_contact by name or email."""
-    cursor.execute(
-        "SELECT market_code FROM market_contact WHERE name ILIKE %s OR email ILIKE %s LIMIT 1", 
-        (f"%{name}%", f"%{name}%")
-    )
+    """
+        Searches market_contacts by name or email, joins with assignments
+        to get the actual market code from the markets table.
+        """
+    query = """
+            SELECT m.code 
+            FROM markets m
+            JOIN market_contact_assignments mca ON m.id = mca.market_id
+            JOIN market_contacts mc ON mca.contact_id = mc.id
+            WHERE mc.name ILIKE %s OR mc.email ILIKE %s
+            LIMIT 1
+        """
+
+    # We pass the formatted string to both ILIKE placeholders
+    cursor.execute(query, (f"%{name}%", f"%{name}%"))
     result = cursor.fetchone()
+
     if result:
         return {"market_code": result[0]}
-    
+
     raise HTTPException(status_code=404, detail="Contact Not Found")
+
 
 @router.get("/check-tests", dependencies=[Depends(verify_iam_identity)])
 def check_tests(asset_id: str, cursor=Depends(get_db_cursor)):
-    """Checks test_assets for active tests."""
-    cursor.execute("SELECT test_id, status FROM test_assets WHERE asset_id = %s", (asset_id,))
+    """
+    Checks if a specific asset has any assigned tests by joining
+    the test_assets mapping table with the main tests table.
+    """
+    query = """
+        SELECT t.id, t.status 
+        FROM tests t
+        JOIN test_assets ta ON t.id = ta.test_id
+        WHERE ta.asset_id = %s
+    """
+
+    cursor.execute(query, (asset_id,))
     results = cursor.fetchall()
+
     if results:
-         return [{"test_id": r[0], "status": r[1]} for r in results]
-         
-    return [] # Return empty list if no tests found
+        return [{"test_id": r[0], "status": r[1]} for r in results]
+
+    return []  # Return empty list if no tests found
 
 # ==========================================
 # 2. The Final Save Endpoint

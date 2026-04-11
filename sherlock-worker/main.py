@@ -30,10 +30,8 @@ def get_iam_token():
     req = google.auth.transport.requests.Request()
     return google.oauth2.id_token.fetch_id_token(req, IAP_CLIENT_ID)
 
-# ==========================================
-# 🛠️ THE AI TOOLS (Now using HTTP instead of SQL)
-# ==========================================
 
+# AI Tools
 def search_asset(asset_name: str) -> str:
     """
     Searches the database for an asset by name. 
@@ -45,6 +43,7 @@ def search_asset(asset_name: str) -> str:
     res = requests.get(url, params={"name": asset_name}, headers=headers)
     return res.text if res.status_code == 200 else "Not Found."
 
+
 def search_market(market_query: str) -> str:
     """
     Looks up a market by its country code (e.g., 'US', 'FR') or name.
@@ -54,6 +53,7 @@ def search_market(market_query: str) -> str:
     headers = {"Authorization": f"Bearer {get_iam_token()}"}
     res = requests.get(url, params={"query": market_query}, headers=headers)
     return res.text if res.status_code == 200 else "Market Not Found."
+
 
 def search_market_by_contact(person_name: str) -> str:
     """
@@ -66,6 +66,7 @@ def search_market_by_contact(person_name: str) -> str:
     res = requests.get(url, params={"name": person_name}, headers=headers)
     return res.text if res.status_code == 200 else "Contact Not Found."
 
+
 def check_asset_tests(asset_id: str) -> str:
     """
     Checks if a specific asset_id already has active tests assigned to it.
@@ -76,9 +77,7 @@ def check_asset_tests(asset_id: str) -> str:
     res = requests.get(url, params={"asset_id": asset_id}, headers=headers)
     return res.text if res.status_code == 200 else "No active tests found for this asset."
 
-# ==========================================
-# 🧠 THE MAIN TRIGGER LOGIC
-# ==========================================
+# main logic trigger
 
 @app.post("/")
 async def pubsub_trigger(request: Request):
