@@ -116,6 +116,8 @@ async def submit_intake_note(
         print(f"Database Error: {e}")
         raise HTTPException(status_code=500, detail="Failed to register intake note.")
 
+    cursor.connection.commit()
+
     # --- 3. Wake up Sherlock (Pub/Sub Trigger) ---
     try:
         if os.environ.get("ENV") != "local":
@@ -145,16 +147,14 @@ def get_intake_queue(current_user: dict = Depends(require_admin), cursor = Depen
     """Fetches the active intake queue for the Admin Inbox."""
     cursor.execute("""
         SELECT id, created_at, status, file_path, original_filename, source_type, uploaded_by, 
-               ai_raw_text, ai_summary, ai_best_guess_asset_id, ai_best_guess_market, ai_confidence, ai_alternative_matches
+               ai_raw_text, ai_summary, ai_extracted_assets
         FROM intake_notes 
         WHERE status IN ('PENDING', 'REVIEW_READY')
         ORDER BY created_at DESC
     """)
-    
-    # Standard boilerplate to convert SQL rows into a list of dictionaries
+
     columns = [col[0] for col in cursor.description]
-    notes = [dict(zip(columns, row)) for row in cursor.fetchall()]
-    return notes
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 @router.delete("/intake/{note_id}")
@@ -163,4 +163,7 @@ def discard_intake_note(note_id: str, current_user: dict = Depends(require_admin
     cursor.execute("UPDATE intake_notes SET status = 'DISCARDED' WHERE id = %s RETURNING id", (note_id,))
     if not cursor.fetchone():
         raise HTTPException(status_code=404, detail="Note not found")
+
+    cursor.connection.commit()
+
     return {"message": "Note discarded successfully."}

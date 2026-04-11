@@ -113,9 +113,7 @@ def check_tests(asset_id: str, cursor=Depends(get_db_cursor)):
 @router.post("/complete-intake", dependencies=[Depends(verify_iam_identity)])
 def complete_intake(result: LuigiIntakeResult, cursor=Depends(get_db_cursor)):
     """Saves the final AI analysis back to the intake_notes table."""
-    
-    # We convert the Pydantic models to dictionaries, then to a JSON string 
-    # so PostgreSQL can save it properly into the JSONB column.
+
     assets_json_str = json.dumps([asset.dict() for asset in result.assets])
     
     cursor.execute("""
@@ -125,6 +123,8 @@ def complete_intake(result: LuigiIntakeResult, cursor=Depends(get_db_cursor)):
             ai_extracted_assets = %s
         WHERE id = %s
     """, (result.summary, assets_json_str, result.note_id))
+
+    cursor.connection.commit()
     
     print(f"✅ Main Backend saved Luigi analysis for Note {result.note_id}")
     return {"status": "success"}
