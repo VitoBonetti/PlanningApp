@@ -95,9 +95,15 @@ def check_service_capacity(service_name: str, quarter: int, year: int) -> str:
         year: integer year (e.g., 2026).
     Returns: JSON with available weeks for that service in that quarter.
     """
+    try:
+        q_int = int(float(quarter))
+        y_int = int(float(year))
+    except (ValueError, TypeError):
+        return "Error: Quarter and Year must be numbers."
+
     url = f"{MAIN_BACKEND_URL}/api/check-capacity"
     headers = {"Authorization": f"Bearer {get_iam_token()}"}
-    res = requests.get(url, params={"service_name": service_name, "quarter": quarter, "year": year}, headers=headers)
+    res = requests.get(url, params={"service_name": service_name, "quarter": q_int, "year": y_int}, headers=headers)
     return res.text if res.status_code == 200 else "Could not check capacity."
 
 # main logic trigger

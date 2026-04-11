@@ -181,17 +181,24 @@ def get_all_markets(cursor=Depends(get_db_cursor)):
 def check_capacity(service_name: str, quarter: int, year: int, cursor=Depends(get_db_cursor)):
     """Calculates available weeks in a quarter based on service type."""
 
-    # 1. Find the service (handling spaces flexibly)
-    service_query = service_name.replace(" ", "%")
-    cursor.execute("SELECT id, name, max_concurrent_per_week FROM services WHERE name ILIKE %s LIMIT 1",
-                   (f"%{service_query}%",))
+    # remove spaces from search term and database column
+    search_term = f"%{service_name.lower().replace(' ', '').replace('-', '')}%"
+
+    cursor.execute("""
+        SELECT id, name, max_concurrent_per_week 
+        FROM services 
+        WHERE REPLACE(REPLACE(LOWER(name), ' ', ''), '-', '') LIKE %s 
+        LIMIT 1
+    """, (search_term,))
+
     service = cursor.fetchone()
 
     if not service:
+        # This will now return cleanly to the AI so it can report the specific failure
         return {"error": f"Service matching '{service_name}' not found in DB."}
 
     service_id, s_name, max_concurrent = service
-    is_blackbox = "blackbox" in s_name.lower() or "black box" in s_name.lower()
+    is_blackbox = "blackbox" in s_name.lower().replace(" ", "")
 
     # 2. Calculate week boundaries for the quarter
     q_start = (quarter - 1) * 13 + 1
