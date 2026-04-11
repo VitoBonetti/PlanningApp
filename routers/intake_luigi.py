@@ -102,27 +102,47 @@ def search_contact(name: str, cursor=Depends(get_db_cursor)):
 @router.get("/check-tests", dependencies=[Depends(verify_iam_identity)])
 def check_tests(asset_id: str, cursor=Depends(get_db_cursor)):
     """
-    Checks if a specific asset has any assigned tests by joining
-    the test_assets mapping table with the main tests table.
-    """
+        Checks if a specific asset has any assigned tests.
+        Returns comprehensive test and service details, excluding whitebox_category.
+        """
     query = """
-        SELECT t.id, t.status 
-        FROM tests t
-        JOIN test_assets ta ON t.id = ta.test_id
-        WHERE ta.asset_id = %s
+    SELECT 
+        t.id, 
+        t.name, 
+        s.name as service_name, 
+        t.type, 
+        t.credits_per_week, 
+        t.duration_weeks, 
+        t.start_week, 
+        t.start_year, 
+        t.status 
+    FROM tests t
+    JOIN test_assets ta ON t.id = ta.test_id
+    LEFT JOIN services s ON t.service_id = s.id
+    WHERE ta.asset_id = %s
     """
 
     cursor.execute(query, (asset_id,))
     results = cursor.fetchall()
 
     if results:
-        return [{"test_id": r[0], "status": r[1]} for r in results]
+        return [
+            {
+                "test_id": r[0],
+                "name": r[1],
+                "service_name": r[2],  # Meaningful string for the AI instead of a UUID
+                "type": r[3],
+                "credits_per_week": r[4],
+                "duration_weeks": r[5],
+                "start_week": r[6],
+                "start_year": r[7],
+                "status": r[8]
+            } for r in results
+        ]
 
     return []  # Return empty list if no tests found
 
-# ==========================================
-# 2. The Final Save Endpoint
-# ==========================================
+# save Endpoint
 
 @router.post("/complete-intake", dependencies=[Depends(verify_iam_identity)])
 def complete_intake(result: LuigiIntakeResult, cursor=Depends(get_db_cursor)):

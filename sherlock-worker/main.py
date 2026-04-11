@@ -70,7 +70,8 @@ def search_market_by_contact(person_name: str) -> str:
 def check_asset_tests(asset_id: str) -> str:
     """
     Checks if a specific asset_id already has active tests assigned to it.
-    Use this to verify if the asset is already being tested.
+    Returns a JSON string containing comprehensive test details: test name, service name, type, credits per week, duration, planned start week/year, and status.
+    Use this enriched data to write a highly detailed "Mentioned Test Details" paragraph in your summary.
     """
     url = f"{MAIN_BACKEND_URL}/api/check-tests"
     headers = {"Authorization": f"Bearer {get_iam_token()}"}
