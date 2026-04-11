@@ -39,7 +39,7 @@ steps:
       - '--min-instances'
       - '0' # Scale to zero when idle
       - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID,LOCATION=europe-west1,DB_INSTANCE_NAME=gost-db,POSTGRES_DB=gost-db,IAM_SA_EMAIL=gcp-backend-sa@gostcontrolpanel.iam.gserviceaccount.com,INTAKE_BUCKET_NAME=gcp-intake-artifacts,GEMINI_KEY_NAME=gcp-luigi-key,MAIN_BACKEND_URL=https://gcp.vitobonetti.nl'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,LOCATION=europe-west1,DB_INSTANCE_NAME=gost-db,POSTGRES_DB=gost-db,IAM_SA_EMAIL=gcp-backend-sa@gostcontrolpanel.iam.gserviceaccount.com,INTAKE_BUCKET_NAME=gcp-intake-artifacts,GEMINI_KEY_NAME=gcp-luigi-key,MAIN_BACKEND_URL=https://gcp.vitobonetti.nl,IAP_CLIENT_ID=449194831480-2letrd5t406ukd42n9rm5iopq8dh8k8m.apps.googleusercontent.com'
 
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/sherlock-worker:$COMMIT_SHA'

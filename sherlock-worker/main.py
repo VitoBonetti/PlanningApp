@@ -15,6 +15,7 @@ PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
 BUCKET_NAME = os.environ.get("INTAKE_BUCKET_NAME")
 GEMINI_KEY_NAME = os.environ.get("GEMINI_KEY_NAME")
 MAIN_BACKEND_URL = os.environ.get("MAIN_BACKEND_URL")
+IAP_CLIENT_ID = os.environ.get("IAP_CLIENT_ID")
 
 # --- Security: Fetch API Key ---
 def get_gemini_key():
@@ -27,8 +28,7 @@ def get_gemini_key():
 def get_iam_token():
     """Fetches a dynamic OIDC token to authenticate with the main backend."""
     req = google.auth.transport.requests.Request()
-    # Google generates a token specifically meant for your MAIN_BACKEND_URL
-    return google.oauth2.id_token.fetch_id_token(req, MAIN_BACKEND_URL)
+    return google.oauth2.id_token.fetch_id_token(req, IAP_CLIENT_ID)
 
 # ==========================================
 # 🛠️ THE AI TOOLS (Now using HTTP instead of SQL)
