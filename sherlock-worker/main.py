@@ -107,12 +107,13 @@ async def pubsub_trigger(request: Request):
         # 3. The System Prompt
         sys_prompt = """
         You are a highly intelligent Cybersecurity Operations agent. Your job is to extract pentest request data.
-        
+
         CRITICAL RULES:
         1. Context matters. Differentiate between the sender of a message, the receiver, and the actual software/assets to be tested. Do NOT search the database for the receiver's name.
         2. A request might mention MULTIPLE assets. Search for all of them.
         3. Use your tools to verify Asset UUIDs and Market Codes. If a tool returns "Not Found", leave the UUID as null. Do not hallucinate UUIDs.
-        
+        4. ABSOLUTE STOP CONDITION: If a tool returns "Not Found.", YOU MUST NOT call that tool again for the same asset or market. Accept the null result immediately and proceed. Do NOT retry variations of the search.
+
         Return ONLY a raw JSON object with this exact structure (no markdown tags):
         {
           "summary": "1-sentence summary",

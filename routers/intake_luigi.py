@@ -1,6 +1,6 @@
 import os
 import json
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from pydantic import BaseModel
 from typing import List, Optional
 from google.oauth2 import id_token
@@ -16,18 +16,29 @@ router = APIRouter(tags=["Intake Luigi"])
 def verify_iam_identity(request: Request):
     iap_email_header = request.headers.get("x-goog-authenticated-user-email")
 
-    if iap_email_header:
-        # IAP format is usually "accounts.google.com:email@address.com"
-        email = iap_email_header.split(":")[-1].lower()
+    # 1. Block requests missing the IAP header entirely
+    if not iap_email_header:
+        print("🚨 SECURITY ALERT: Request attempted without IAP header.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing required identity header."
+        )
 
-        # SA_EMAIL is your SA_EMAIL environment variable
-        if email != SA_EMAIL.lower():
-            print(f"🚨 DEBUG IAP MISMATCH: IAP sent '{email}', but backend expected '{SA_EMAIL.lower()}'")
-            raise HTTPException(status_code=403, detail=f"Unauthorized IAP Account: {email}")
-        return {"email": email}
+    # 2. Extract and normalize the email
+    email = iap_email_header.split(":")[-1].lower()
+
+    # 3. Strict match against the expected Service Account
+    if email != SA_EMAIL.lower():
+        print(f"🚨 AUTH FAILURE: '{email}' tried to access internal AI tools.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Unauthorized identity."
+        )
+
+    return {"email": email}
 
 
-#  The Search Endpoints (Used by Gemini Tools)
+#  endpoint used by luigi
 
 @router.get("/search-asset", dependencies=[Depends(verify_iam_identity)])
 def search_asset(name: str, cursor=Depends(get_db_cursor)):
@@ -115,16 +126,21 @@ def complete_intake(result: LuigiIntakeResult, cursor=Depends(get_db_cursor)):
     """Saves the final AI analysis back to the intake_notes table."""
 
     assets_json_str = json.dumps([asset.dict() for asset in result.assets])
-    
+
     cursor.execute("""
         UPDATE intake_notes 
         SET status = 'REVIEW_READY', 
             ai_summary = %s,
             ai_extracted_assets = %s
-        WHERE id = %s
+        WHERE id = %s AND status != 'DISCARDED'
     """, (result.summary, assets_json_str, result.note_id))
 
+    # check if the update actually happened
+    if cursor.rowcount == 0:
+        print(f"⚠️ Note {result.note_id} was already discarded or not found. Skipping Luigi update.")
+    else:
+        print(f"✅ Main Backend saved Luigi analysis for Note {result.note_id}")
+
     cursor.connection.commit()
-    
-    print(f"✅ Main Backend saved Luigi analysis for Note {result.note_id}")
+
     return {"status": "success"}
