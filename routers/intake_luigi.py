@@ -13,24 +13,16 @@ VERIFY_EMAIL = os.environ.get("IAM_SA_EMAIL")
 router = APIRouter(tags=["Intake Luigi"])
 
 def verify_iam_identity(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing IAM Bearer Token")
-    
-    token = auth_header.split(" ")[1]
-    try:
-        # This mathematically verifies the signature with Google's public keys
-        # It ensures the request came from an authorized GCP Service Account
-        claim = id_token.verify_oauth2_token(token, requests.Request())
-        
-        # Optional: You can explicitly check WHICH service account called it
-        email = claim.get("email")
-        if email != VERIFY_EMAIL:
-            raise HTTPException(status_code=403, detail="Unauthorized Service Account")
-        
-        return claim
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=f"Invalid IAM Token: {str(e)}")
+    iap_email_header = request.headers.get("x-goog-authenticated-user-email")
+
+    if iap_email_header:
+        # IAP format is usually "accounts.google.com:email@address.com"
+        email = iap_email_header.split(":")[-1].lower()
+
+        # VERIFY_EMAIL is your IAM_SA_EMAIL environment variable
+        if email != VERIFY_EMAIL.lower():
+            raise HTTPException(status_code=403, detail=f"Unauthorized IAP Account: {email}")
+        return {"email": email}
 
 
 # ==========================================
