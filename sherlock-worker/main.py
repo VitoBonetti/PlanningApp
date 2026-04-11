@@ -1,102 +1,162 @@
 import os
 import base64
 import json
+import requests
 from fastapi import FastAPI, Request, HTTPException
-from google.cloud import storage
-from google.cloud.sql.connector import Connector, IPTypes
-import pg8000
-import sqlalchemy
+from google.cloud import storage, secretmanager
+import google.generativeai as genai
+import google.auth.transport.requests
+import google.oauth2.id_token
 
 app = FastAPI()
 
 # --- Configuration ---
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-LOCATION = os.environ.get("LOCATION")
-INSTANCE_NAME = os.environ.get("DB_INSTANCE_NAME")
-DB_NAME = os.environ.get("POSTGRES_DB")
-DB_USER = os.environ.get("IAM_SA_EMAIL")
 BUCKET_NAME = os.environ.get("INTAKE_BUCKET_NAME")
+GEMINI_KEY_NAME = os.environ.get("GEMINI_KEY_NAME")
+MAIN_BACKEND_URL = os.environ.get("MAIN_BACKEND_URL")
 
-# --- Database Connection ---
-def get_db_connection():
-    connector = Connector()
-    conn = connector.connect(
-        f"{PROJECT_ID}:{LOCATION}:{INSTANCE_NAME}",
-        "pg8000",
-        user=DB_USER,
-        db=DB_NAME,
-        enable_iam_auth=True,
-        ip_type=IPTypes.PRIVATE
-    )
-    return conn
+# --- Security: Fetch API Key ---
+def get_gemini_key():
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{PROJECT_ID}/secrets/{GEMINI_KEY_NAME}/versions/latest"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode("UTF-8")
+
+# --- Security: Dynamic IAM Token for Backend ---
+def get_iam_token():
+    """Fetches a dynamic OIDC token to authenticate with the main backend."""
+    req = google.auth.transport.requests.Request()
+    # Google generates a token specifically meant for your MAIN_BACKEND_URL
+    return google.oauth2.id_token.fetch_id_token(req, MAIN_BACKEND_URL)
+
+# ==========================================
+# 🛠️ THE AI TOOLS (Now using HTTP instead of SQL)
+# ==========================================
+
+def search_asset(asset_name: str) -> str:
+    """
+    Searches the database for an asset by name. 
+    Use this when you identify a software, app, or system that needs testing.
+    Returns a JSON string of matches with their UUIDs, or 'Not Found'.
+    """
+    url = f"{MAIN_BACKEND_URL}/search-asset"
+    headers = {"Authorization": f"Bearer {get_iam_token()}"}
+    res = requests.get(url, params={"name": asset_name}, headers=headers)
+    return res.text if res.status_code == 200 else "Not Found."
+
+def search_market(market_query: str) -> str:
+    """
+    Looks up a market by its country code (e.g., 'US', 'FR') or name.
+    Returns the exact market code if found.
+    """
+    url = f"{MAIN_BACKEND_URL}/search-market"
+    headers = {"Authorization": f"Bearer {get_iam_token()}"}
+    res = requests.get(url, params={"query": market_query}, headers=headers)
+    return res.text if res.status_code == 200 else "Market Not Found."
+
+def search_market_by_contact(person_name: str) -> str:
+    """
+    Searches the market_contact table by a person's name or email.
+    Use this if no market is mentioned, but a specific contact person is.
+    Returns the market code associated with this person.
+    """
+    url = f"{MAIN_BACKEND_URL}/search-contact"
+    headers = {"Authorization": f"Bearer {get_iam_token()}"}
+    res = requests.get(url, params={"name": person_name}, headers=headers)
+    return res.text if res.status_code == 200 else "Contact Not Found."
+
+def check_asset_tests(asset_id: str) -> str:
+    """
+    Checks if a specific asset_id already has active tests assigned to it.
+    Use this to verify if the asset is already being tested.
+    """
+    url = f"{MAIN_BACKEND_URL}/check-tests"
+    headers = {"Authorization": f"Bearer {get_iam_token()}"}
+    res = requests.get(url, params={"asset_id": asset_id}, headers=headers)
+    return res.text if res.status_code == 200 else "No active tests found for this asset."
+
+# ==========================================
+# 🧠 THE MAIN TRIGGER LOGIC
+# ==========================================
 
 @app.post("/")
 async def pubsub_trigger(request: Request):
-    """This endpoint is called automatically by Google Pub/Sub."""
     envelope = await request.json()
-
-    # 1. Validate the Pub/Sub payload
     if not envelope or "message" not in envelope:
-        raise HTTPException(status_code=400, detail="Invalid Pub/Sub message format")
+        raise HTTPException(status_code=400, detail="Invalid Pub/Sub format")
     
-    pubsub_message = envelope["message"]
-    
-    if "data" not in pubsub_message:
-        raise HTTPException(status_code=400, detail="No data in Pub/Sub message")
-
-    # 2. Decode the Base64 message sent by your main backend
-    data_json = base64.b64decode(pubsub_message["data"]).decode("utf-8")
-    data = json.loads(data_json)
-    
+    data = json.loads(base64.b64decode(envelope["message"]["data"]).decode("utf-8"))
     note_id = data.get("note_id")
     file_path = data.get("file_path")
     source_type = data.get("source_type")
 
-    print(f"🕵️ Sherlock woke up! Processing note: {note_id}")
+    print(f"🕵️ Sherlock waking up as an Agent for note: {note_id}")
 
     try:
-        # 3. Download the file from the Google Cloud Storage bucket
+        # 1. Get File
         storage_client = storage.Client()
         bucket = storage_client.bucket(BUCKET_NAME)
-        blob = bucket.blob(file_path)
+        file_bytes = bucket.blob(file_path).download_as_bytes()
         
-        # Download the file into memory
-        file_bytes = blob.download_as_bytes()
+        # 2. Setup Gemini 1.5 Pro with Tools
+        genai.configure(api_key=get_gemini_key())
         
-        # ==========================================
-        # 🧠 AI LOGIC GOES HERE (Placeholder for now)
-        # ==========================================
-        # If source_type == 'TEXT': pass file_bytes.decode('utf-8') to LLM
-        # If source_type == 'IMAGE': pass file_bytes to Vision AI / OCR
-        
-        mock_summary = "Admin uploaded a document requesting a test."
-        mock_asset_guess = "00000000-0000-0000-0000-000000000000" # Dummy UUID
-        mock_market = "US"
-        mock_confidence = 85
-        # ==========================================
+        ai_tools = [search_asset, search_market, search_market_by_contact, check_asset_tests]
+        model = genai.GenerativeModel('gemini-2.5-pro', tools=ai_tools)
 
-        # 4. Update the Database so the Admin sees it in the Inbox
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        # 3. The System Prompt
+        sys_prompt = """
+        You are a highly intelligent Cybersecurity Operations agent. Your job is to extract pentest request data.
         
-        cursor.execute("""
-            UPDATE intake_notes 
-            SET status = 'REVIEW_READY', 
-                ai_summary = %s,
-                ai_best_guess_asset_id = %s,
-                ai_best_guess_market = %s,
-                ai_confidence = %s
-            WHERE id = %s
-        """, (mock_summary, mock_asset_guess, mock_market, mock_confidence, note_id))
+        CRITICAL RULES:
+        1. Context matters. Differentiate between the sender of a message, the receiver, and the actual software/assets to be tested. Do NOT search the database for the receiver's name.
+        2. A request might mention MULTIPLE assets. Search for all of them.
+        3. Use your tools to verify Asset UUIDs and Market Codes. If a tool returns "Not Found", leave the UUID as null. Do not hallucinate UUIDs.
         
-        conn.commit()
-        cursor.close()
-        conn.close()
+        Return ONLY a raw JSON object with this exact structure (no markdown tags):
+        {
+          "summary": "1-sentence summary",
+          "assets": [
+             {
+               "asset_id": "verified-uuid-from-db-or-null",
+               "name_mentioned": "name from text",
+               "market": "verified-market-code-or-null",
+               "confidence": 85
+             }
+          ]
+        }
+        """
 
-        print(f"✅ Successfully processed {note_id}. Going back to sleep.")
+        # 4. Start the Agentic Chat Session
+        chat = model.start_chat(enable_automatic_function_calling=True)
+
+        if source_type == 'TEXT':
+            response = chat.send_message([sys_prompt, file_bytes.decode('utf-8')])
+        else:
+            mime = "application/pdf" if file_path.endswith(".pdf") else "image/png"
+            response = chat.send_message([sys_prompt, {"mime_type": mime, "data": file_bytes}])
+
+        # 5. Parse the final JSON response
+        ai_data = json.loads(response.text.strip())
+        
+        # 6. Save to DB (VIA HTTP REQUEST TO MAIN BACKEND!)
+        payload = {
+            "note_id": note_id,
+            "summary": ai_data.get("summary", "Analysis complete."),
+            "assets": ai_data.get("assets", [])
+        }
+        
+        url = f"{MAIN_BACKEND_URL}/complete-intake"
+        headers = {"Authorization": f"Bearer {get_iam_token()}"}
+        save_res = requests.post(url, json=payload, headers=headers)
+        
+        # Throw an error if the backend rejected the save
+        save_res.raise_for_status()
+
+        print(f"✅ Sherlock Agent successfully resolved and saved note: {note_id}")
         return {"status": "success"}
 
     except Exception as e:
-        print(f"🚨 Sherlock encountered an error: {e}")
-        # Return a 200 even on error so Pub/Sub doesn't infinitely retry a broken file
+        print(f"🚨 Sherlock error: {e}")
         return {"status": "error", "detail": str(e)}

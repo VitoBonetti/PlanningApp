@@ -1,0 +1,1 @@
+ALTER TABLE intake_notes ADD COLUMN IF NOT EXISTS ai_extracted_assets JSONB;
