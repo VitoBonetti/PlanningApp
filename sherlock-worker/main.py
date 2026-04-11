@@ -40,7 +40,7 @@ def search_asset(asset_name: str) -> str:
     Use this when you identify a software, app, or system that needs testing.
     Returns a JSON string of matches with their UUIDs, or 'Not Found'.
     """
-    url = f"{MAIN_BACKEND_URL}/search-asset"
+    url = f"{MAIN_BACKEND_URL}/api/search-asset"
     headers = {"Authorization": f"Bearer {get_iam_token()}"}
     res = requests.get(url, params={"name": asset_name}, headers=headers)
     return res.text if res.status_code == 200 else "Not Found."
@@ -50,7 +50,7 @@ def search_market(market_query: str) -> str:
     Looks up a market by its country code (e.g., 'US', 'FR') or name.
     Returns the exact market code if found.
     """
-    url = f"{MAIN_BACKEND_URL}/search-market"
+    url = f"{MAIN_BACKEND_URL}/api/search-market"
     headers = {"Authorization": f"Bearer {get_iam_token()}"}
     res = requests.get(url, params={"query": market_query}, headers=headers)
     return res.text if res.status_code == 200 else "Market Not Found."
@@ -61,7 +61,7 @@ def search_market_by_contact(person_name: str) -> str:
     Use this if no market is mentioned, but a specific contact person is.
     Returns the market code associated with this person.
     """
-    url = f"{MAIN_BACKEND_URL}/search-contact"
+    url = f"{MAIN_BACKEND_URL}/api/search-contact"
     headers = {"Authorization": f"Bearer {get_iam_token()}"}
     res = requests.get(url, params={"name": person_name}, headers=headers)
     return res.text if res.status_code == 200 else "Contact Not Found."
@@ -71,7 +71,7 @@ def check_asset_tests(asset_id: str) -> str:
     Checks if a specific asset_id already has active tests assigned to it.
     Use this to verify if the asset is already being tested.
     """
-    url = f"{MAIN_BACKEND_URL}/check-tests"
+    url = f"{MAIN_BACKEND_URL}/api/check-tests"
     headers = {"Authorization": f"Bearer {get_iam_token()}"}
     res = requests.get(url, params={"asset_id": asset_id}, headers=headers)
     return res.text if res.status_code == 200 else "No active tests found for this asset."
@@ -159,7 +159,7 @@ async def pubsub_trigger(request: Request):
             "assets": ai_data.get("assets", [])
         }
         
-        url = f"{MAIN_BACKEND_URL}/complete-intake"
+        url = f"{MAIN_BACKEND_URL}/api/complete-intake"
         headers = {"Authorization": f"Bearer {get_iam_token()}"}
         save_res = requests.post(url, json=payload, headers=headers)
         
