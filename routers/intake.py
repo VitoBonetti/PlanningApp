@@ -149,7 +149,7 @@ def get_intake_queue(current_user: dict = Depends(require_admin), cursor = Depen
         SELECT id, created_at, status, file_path, original_filename, source_type, uploaded_by, 
                ai_raw_text, ai_summary, ai_extracted_assets
         FROM intake_notes 
-        WHERE status IN ('PENDING', 'REVIEW_READY')
+        WHERE status IN ('PENDING', 'REVIEW_READY', 'ARCHIVED')
         ORDER BY created_at DESC
     """)
 
@@ -170,6 +170,32 @@ def delete_gcs_blob(file_path: str):
             print(f"🗑️ Cleaned up discarded artifact from GCS: {file_path}")
     except Exception as e:
         print(f"🚨 Failed to delete {file_path} from GCS: {e}")
+
+
+@router.put("/intake/{note_id}/archive")
+def archive_intake_note(
+        note_id: str,
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    """Moves a note out of the active inbox and marks who archived it."""
+
+    # We append the user's name to the ai_summary or a dedicated notes field
+    # to keep track of who archived it without needing a complex DB migration today.
+    archive_stamp = f"\n\n[Archived by {current_user['name']}]"
+
+    cursor.execute("""
+        UPDATE intake_notes 
+        SET status = 'ARCHIVED',
+            ai_summary = COALESCE(ai_summary, '') || %s
+        WHERE id = %s RETURNING id
+    """, (archive_stamp, note_id))
+
+    if cursor.fetchone() is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    cursor.connection.commit()
+    return {"message": "Note archived successfully"}
 
 
 @router.delete("/intake/{note_id}")
