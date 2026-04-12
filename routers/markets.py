@@ -62,8 +62,16 @@ def delete_market(market_id: str, current_user: dict = Depends(require_admin), c
 def get_market_analytics(market_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """Aggregates KPI data, test statuses, and timeline metrics for a specific market."""
 
-    # 1. Total Assets
-    cursor.execute("SELECT COUNT(*) FROM assets WHERE market_id = %s", (market_id,))
+    # 0. Get the Market Code (since Assets table uses the string Code, not the UUID)
+    cursor.execute("SELECT code FROM markets WHERE id = %s", (market_id,))
+    market_row = cursor.fetchone()
+    if not market_row:
+        raise HTTPException(status_code=404, detail="Market not found")
+
+    market_code = market_row[0]
+
+    # 1. Total Assets (Using market_code)
+    cursor.execute("SELECT COUNT(*) FROM assets WHERE market = %s", (market_code,))
     total_assets = cursor.fetchone()[0]
 
     # 2. Asset Test Status Breakdown (Queue vs Completed)
@@ -72,9 +80,9 @@ def get_market_analytics(market_id: str, current_user: dict = Depends(require_ad
         FROM assets a
         JOIN test_assets ta ON a.id = ta.asset_id
         JOIN tests t ON ta.test_id = t.id
-        WHERE a.market_id = %s
+        WHERE a.market = %s
         GROUP BY t.status
-    """, (market_id,))
+    """, (market_code,))
     status_breakdown = [{"status": r[0], "count": r[1]} for r in cursor.fetchall()]
 
     # 3. Timeline / Burn-down (Tests per Week/Year)
@@ -83,11 +91,11 @@ def get_market_analytics(market_id: str, current_user: dict = Depends(require_ad
         FROM tests t
         JOIN test_assets ta ON t.id = ta.test_id
         JOIN assets a ON ta.asset_id = a.id
-        WHERE a.market_id = %s AND t.start_year IS NOT NULL
+        WHERE a.market = %s AND t.start_year IS NOT NULL
         GROUP BY t.start_year, t.start_week
         ORDER BY t.start_year ASC, t.start_week ASC
         LIMIT 12
-    """, (market_id,))
+    """, (market_code,))
 
     # Format for Recharts (e.g., "2024-W14")
     timeline = [{"time": f"{r[0]}-W{r[1]}", "tests": r[2]} for r in cursor.fetchall()]
