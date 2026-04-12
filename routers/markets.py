@@ -50,8 +50,50 @@ def update_market(market_id: str, m: MarketUpdate, current_user: dict = Depends(
     cursor.connection.commit()
     return {"message": "Market updated successfully."}
 
+
 @router.delete("/markets/{market_id}")
 def delete_market(market_id: str, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     cursor.execute("DELETE FROM markets WHERE id = %s", (market_id,))
     cursor.connection.commit()
     return {"message": "Market deleted."}
+
+
+@router.get("/markets/{market_id}/analytics")
+def get_market_analytics(market_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """Aggregates KPI data, test statuses, and timeline metrics for a specific market."""
+
+    # 1. Total Assets
+    cursor.execute("SELECT COUNT(*) FROM assets WHERE market_id = %s", (market_id,))
+    total_assets = cursor.fetchone()[0]
+
+    # 2. Asset Test Status Breakdown (Queue vs Completed)
+    cursor.execute("""
+        SELECT t.status, COUNT(DISTINCT a.id)
+        FROM assets a
+        JOIN test_assets ta ON a.id = ta.asset_id
+        JOIN tests t ON ta.test_id = t.id
+        WHERE a.market_id = %s
+        GROUP BY t.status
+    """, (market_id,))
+    status_breakdown = [{"status": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+    # 3. Timeline / Burn-down (Tests per Week/Year)
+    cursor.execute("""
+        SELECT t.start_year, t.start_week, COUNT(*) as test_count
+        FROM tests t
+        JOIN test_assets ta ON t.id = ta.test_id
+        JOIN assets a ON ta.asset_id = a.id
+        WHERE a.market_id = %s AND t.start_year IS NOT NULL
+        GROUP BY t.start_year, t.start_week
+        ORDER BY t.start_year ASC, t.start_week ASC
+        LIMIT 12
+    """, (market_id,))
+
+    # Format for Recharts (e.g., "2024-W14")
+    timeline = [{"time": f"{r[0]}-W{r[1]}", "tests": r[2]} for r in cursor.fetchall()]
+
+    return {
+        "total_assets": total_assets,
+        "status_breakdown": status_breakdown,
+        "timeline": timeline
+    }
