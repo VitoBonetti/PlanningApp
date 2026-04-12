@@ -13,10 +13,10 @@ def get_markets(current_user: dict = Depends(get_current_user), cursor = Depends
     # Block pentesters entirely
     if current_user.get('role') == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot access market data.")
-        
+
     cursor.execute("SELECT id, code, name, language, region, is_active, description, created_at FROM markets ORDER BY region, name")
     rows = cursor.fetchall()
-    
+
     markets = []
     for r in rows:
         markets.append({
@@ -60,17 +60,15 @@ def delete_market(market_id: str, current_user: dict = Depends(require_admin), c
 
 @router.get("/markets/{market_id}/analytics")
 def get_market_analytics(market_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Aggregates KPI data, test statuses, and timeline metrics for a specific market."""
+    """Aggregates KPI data, test statuses, timeline metrics, and Whitebox details for a specific market."""
 
-    # 0. Get the Market Code
     cursor.execute("SELECT code FROM markets WHERE id = %s", (market_id,))
     market_row = cursor.fetchone()
     if not market_row:
         raise HTTPException(status_code=404, detail="Market not found")
-
     market_code = market_row[0]
 
-    # 1. Enhanced KPIs (Total, KPI=True, PentestQueue=True)
+    # Enhanced KPIs
     cursor.execute("""
         SELECT 
             COUNT(DISTINCT a.id) as total_assets,
@@ -82,7 +80,7 @@ def get_market_analytics(market_id: str, current_user: dict = Depends(get_curren
     """, (market_code,))
     kpis = cursor.fetchone()
 
-    # 2. Asset Test Status Breakdown (STRICTLY for Pentest Queue Assets)
+    #  Asset Test Status Breakdown (+ Asset Names)
     cursor.execute("""
         SELECT 
             CASE 
@@ -91,7 +89,8 @@ def get_market_analytics(market_id: str, current_user: dict = Depends(get_curren
                 WHEN t.status = 'Not Planned' THEN 'Not Planned'
                 ELSE 'Planned'
             END as mapped_status,
-            COUNT(DISTINCT a.id)
+            COUNT(DISTINCT a.id),
+            STRING_AGG(DISTINCT a.name, ', ') as assets
         FROM assets a
         LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
@@ -100,53 +99,93 @@ def get_market_analytics(market_id: str, current_user: dict = Depends(get_curren
         GROUP BY mapped_status
     """, (market_code,))
 
-    # Force initialize to guarantee the UI always gets the 3 colors
-    status_counts = {"Completed": 0, "Planned": 0, "Not Planned": 0}
+    status_counts = {"Completed": {"count": 0, "assets": ""}, "Planned": {"count": 0, "assets": ""},
+                     "Not Planned": {"count": 0, "assets": ""}}
     for r in cursor.fetchall():
-        if r[0] in status_counts:
-            status_counts[r[0]] += r[1]
+        stat, cnt, assets = r[0], r[1], r[2]
+        if stat in status_counts:
+            status_counts[stat]["count"] += cnt
+            status_counts[stat]["assets"] = assets
         else:
-            status_counts["Planned"] += r[1]  # Catch-all for Scheduled, Pending, etc.
+            status_counts["Planned"]["count"] += cnt
+            status_counts["Planned"]["assets"] += f", {assets}" if status_counts["Planned"]["assets"] else assets
 
-    status_breakdown = [{"status": k, "count": v} for k, v in status_counts.items()]
+    status_breakdown = [{"status": k, "count": v["count"], "assets": v["assets"]} for k, v in status_counts.items()]
 
-    # 3. Service Breakdown (STRICTLY for Pentest Queue Assets)
+    #  Service Breakdown (+ Asset Names)
     cursor.execute("""
-        SELECT COALESCE(NULLIF(TRIM(a.gost_service), ''), 'Unassigned') as svc, COUNT(DISTINCT a.id)
+        SELECT COALESCE(NULLIF(TRIM(a.gost_service), ''), 'Unassigned') as svc, COUNT(DISTINCT a.id), STRING_AGG(DISTINCT a.name, ', ')
         FROM assets a
         LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id
         WHERE a.market = %s AND ra.pentest_queue = TRUE
         GROUP BY svc
     """, (market_code,))
-    service_breakdown = [{"service": r[0], "count": r[1]} for r in cursor.fetchall()]
+    service_breakdown = [{"service": r[0], "count": r[1], "assets": r[2]} for r in cursor.fetchall()]
 
-    # 4. Stacked Timeline (Tests per Week stacked by Service)
+    #  Quarterly Timeline (+ Asset Names)
     cursor.execute("""
-        SELECT t.start_year, t.start_week, COALESCE(s.name, 'Other'), COUNT(DISTINCT t.id)
+        SELECT 
+            t.start_year, 
+            CASE 
+                WHEN t.start_week BETWEEN 1 AND 13 THEN 'Q1'
+                WHEN t.start_week BETWEEN 14 AND 26 THEN 'Q2'
+                WHEN t.start_week BETWEEN 27 AND 39 THEN 'Q3'
+                ELSE 'Q4'
+            END as quarter,
+            COALESCE(s.name, 'Other'), 
+            COUNT(DISTINCT t.id),
+            STRING_AGG(DISTINCT a.name, ', ')
         FROM tests t
         JOIN test_assets ta ON t.id = ta.test_id
         JOIN assets a ON ta.asset_id = a.id
         LEFT JOIN services s ON t.service_id = s.id
         WHERE a.market = %s AND t.start_year IS NOT NULL
-        GROUP BY t.start_year, t.start_week, s.name
-        ORDER BY t.start_year ASC, t.start_week ASC
-        LIMIT 100
+        GROUP BY t.start_year, quarter, COALESCE(s.name, 'Other')
+        ORDER BY t.start_year ASC, quarter ASC
     """, (market_code,))
 
     timeline_dict = {}
     services_set = set()
     for r in cursor.fetchall():
-        time_key = f"{r[0]}-W{r[1]}"
-        svc_name = r[2]
-        cnt = r[3]
+        time_key = f"{r[0]}-{r[1]}"
+        svc_name, cnt, assets = r[2], r[3], r[4]
 
         if time_key not in timeline_dict:
             timeline_dict[time_key] = {"time": time_key}
         timeline_dict[time_key][svc_name] = cnt
+        timeline_dict[time_key][f"{svc_name}_assets"] = assets
         services_set.add(svc_name)
 
     timeline = list(timeline_dict.values())
-    timeline.sort(key=lambda x: (int(x["time"].split("-W")[0]), int(x["time"].split("-W")[1])))
+
+    #  Whitebox Category Breakdown (+ Asset Names)
+    cursor.execute("""
+        SELECT 
+            COALESCE(NULLIF(TRIM(a.whitebox_category), ''), 'Uncategorized') as category,
+            CASE 
+                WHEN t.id IS NULL THEN 'Not Planned'
+                WHEN t.status = 'Completed' THEN 'Completed'
+                WHEN t.status = 'Not Planned' THEN 'Not Planned'
+                ELSE 'Planned'
+            END as mapped_status,
+            COUNT(DISTINCT a.id),
+            STRING_AGG(DISTINCT a.name, ', ')
+        FROM assets a
+        LEFT JOIN test_assets ta ON a.id = ta.asset_id
+        LEFT JOIN tests t ON ta.test_id = t.id
+        WHERE a.market = %s AND a.whitebox_category IS NOT NULL AND TRIM(a.whitebox_category) != ''
+        GROUP BY category, mapped_status
+    """, (market_code,))
+
+    wb_dict = {}
+    for r in cursor.fetchall():
+        cat, status, cnt, assets = r[0], r[1], r[2], r[3]
+        if cat not in wb_dict:
+            wb_dict[cat] = {"category": cat, "Completed": 0, "Planned": 0, "Not Planned": 0}
+        wb_dict[cat][status] = cnt
+        wb_dict[cat][f"{status}_assets"] = assets
+
+    whitebox_breakdown = list(wb_dict.values())
 
     return {
         "total_assets": kpis[0] or 0,
@@ -154,6 +193,7 @@ def get_market_analytics(market_id: str, current_user: dict = Depends(get_curren
         "pq_assets": kpis[2] or 0,
         "status_breakdown": status_breakdown,
         "service_breakdown": service_breakdown,
-        "timeline": timeline[-16:],  # Get the most recent 16 weeks
-        "timeline_services": list(services_set)
+        "timeline": timeline,
+        "timeline_services": list(services_set),
+        "whitebox_breakdown": whitebox_breakdown
     }
