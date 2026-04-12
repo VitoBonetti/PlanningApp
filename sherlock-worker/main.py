@@ -78,6 +78,7 @@ def check_asset_tests(asset_id: str) -> str:
     res = requests.get(url, params={"asset_id": asset_id}, headers=headers)
     return res.text if res.status_code == 200 else "No active tests found for this asset."
 
+
 def get_all_valid_markets() -> str:
     """Returns the full list of all active markets and their codes. Use this to find unconventional markets."""
     url = f"{MAIN_BACKEND_URL}/api/all-markets"
@@ -106,8 +107,8 @@ def check_service_capacity(service_name: str, quarter: int, year: int) -> str:
     res = requests.get(url, params={"service_name": service_name, "quarter": q_int, "year": y_int}, headers=headers)
     return res.text if res.status_code == 200 else "Could not check capacity."
 
-# main logic trigger
 
+# main logic trigger
 @app.post("/")
 async def pubsub_trigger(request: Request):
     envelope = await request.json()

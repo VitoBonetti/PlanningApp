@@ -33,7 +33,6 @@ pool = QueuePool(getconn, pool_size=10, max_overflow=20, timeout=30)
 def get_db_connection():
     try:
         return pool.connect()
-        return conn
     except Exception as e:
         print(f"🚨 Failed to connect to Cloud SQL: {e}")
         return None

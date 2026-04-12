@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-env_origins = os.environ.get("ALLOWED_ORIGINS", "")
+env_origins = os.environ.get("ALLOWED_ORIGINS")
 
 if env_origins:
     # PRODUCTION: Reads from docker-compose.yml
