@@ -170,3 +170,9 @@ class LuigiIntakeResult(BaseModel):
     note_id: str
     summary: str
     assets: List[ExtractedAsset]
+
+
+class ServiceUpdate(BaseModel):
+    name: str
+    max_concurrent_per_week: int
+
