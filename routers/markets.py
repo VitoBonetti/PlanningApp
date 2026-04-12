@@ -59,10 +59,10 @@ def delete_market(market_id: str, current_user: dict = Depends(require_admin), c
 
 
 @router.get("/markets/{market_id}/analytics")
-def get_market_analytics(market_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def get_market_analytics(market_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Aggregates KPI data, test statuses, and timeline metrics for a specific market."""
 
-    # 0. Get the Market Code (since Assets table uses the string Code, not the UUID)
+    # 0. Get the Market Code
     cursor.execute("SELECT code FROM markets WHERE id = %s", (market_id,))
     market_row = cursor.fetchone()
     if not market_row:
@@ -70,38 +70,90 @@ def get_market_analytics(market_id: str, current_user: dict = Depends(require_ad
 
     market_code = market_row[0]
 
-    # 1. Total Assets (Using market_code)
-    cursor.execute("SELECT COUNT(*) FROM assets WHERE market = %s", (market_code,))
-    total_assets = cursor.fetchone()[0]
-
-    # 2. Asset Test Status Breakdown (Queue vs Completed)
+    # 1. Enhanced KPIs (Total, KPI=True, PentestQueue=True)
     cursor.execute("""
-        SELECT t.status, COUNT(DISTINCT a.id)
+        SELECT 
+            COUNT(DISTINCT a.id) as total_assets,
+            COUNT(DISTINCT CASE WHEN a.kpi ILIKE 'true' OR a.kpi = '1' OR a.kpi ILIKE 'yes' THEN a.id END) as kpi_assets,
+            COUNT(DISTINCT CASE WHEN ra.pentest_queue = TRUE THEN a.id END) as pq_assets
         FROM assets a
-        JOIN test_assets ta ON a.id = ta.asset_id
-        JOIN tests t ON ta.test_id = t.id
+        LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id
         WHERE a.market = %s
-        GROUP BY t.status
     """, (market_code,))
-    status_breakdown = [{"status": r[0], "count": r[1]} for r in cursor.fetchall()]
+    kpis = cursor.fetchone()
 
-    # 3. Timeline / Burn-down (Tests per Week/Year)
+    # 2. Asset Test Status Breakdown (STRICTLY for Pentest Queue Assets)
     cursor.execute("""
-        SELECT t.start_year, t.start_week, COUNT(*) as test_count
+        SELECT 
+            CASE 
+                WHEN t.id IS NULL THEN 'Not Planned'
+                WHEN t.status = 'Completed' THEN 'Completed'
+                WHEN t.status = 'Not Planned' THEN 'Not Planned'
+                ELSE 'Planned'
+            END as mapped_status,
+            COUNT(DISTINCT a.id)
+        FROM assets a
+        LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id
+        LEFT JOIN test_assets ta ON a.id = ta.asset_id
+        LEFT JOIN tests t ON ta.test_id = t.id
+        WHERE a.market = %s AND ra.pentest_queue = TRUE
+        GROUP BY mapped_status
+    """, (market_code,))
+
+    # Force initialize to guarantee the UI always gets the 3 colors
+    status_counts = {"Completed": 0, "Planned": 0, "Not Planned": 0}
+    for r in cursor.fetchall():
+        if r[0] in status_counts:
+            status_counts[r[0]] += r[1]
+        else:
+            status_counts["Planned"] += r[1]  # Catch-all for Scheduled, Pending, etc.
+
+    status_breakdown = [{"status": k, "count": v} for k, v in status_counts.items()]
+
+    # 3. Service Breakdown (STRICTLY for Pentest Queue Assets)
+    cursor.execute("""
+        SELECT COALESCE(NULLIF(TRIM(a.gost_service), ''), 'Unassigned') as svc, COUNT(DISTINCT a.id)
+        FROM assets a
+        LEFT JOIN raw_assets ra ON a.inventory_id = ra.inventory_id
+        WHERE a.market = %s AND ra.pentest_queue = TRUE
+        GROUP BY svc
+    """, (market_code,))
+    service_breakdown = [{"service": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+    # 4. Stacked Timeline (Tests per Week stacked by Service)
+    cursor.execute("""
+        SELECT t.start_year, t.start_week, COALESCE(s.name, 'Other'), COUNT(DISTINCT t.id)
         FROM tests t
         JOIN test_assets ta ON t.id = ta.test_id
         JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN services s ON t.service_id = s.id
         WHERE a.market = %s AND t.start_year IS NOT NULL
-        GROUP BY t.start_year, t.start_week
+        GROUP BY t.start_year, t.start_week, s.name
         ORDER BY t.start_year ASC, t.start_week ASC
-        LIMIT 12
+        LIMIT 100
     """, (market_code,))
 
-    # Format for Recharts (e.g., "2024-W14")
-    timeline = [{"time": f"{r[0]}-W{r[1]}", "tests": r[2]} for r in cursor.fetchall()]
+    timeline_dict = {}
+    services_set = set()
+    for r in cursor.fetchall():
+        time_key = f"{r[0]}-W{r[1]}"
+        svc_name = r[2]
+        cnt = r[3]
+
+        if time_key not in timeline_dict:
+            timeline_dict[time_key] = {"time": time_key}
+        timeline_dict[time_key][svc_name] = cnt
+        services_set.add(svc_name)
+
+    timeline = list(timeline_dict.values())
+    timeline.sort(key=lambda x: (int(x["time"].split("-W")[0]), int(x["time"].split("-W")[1])))
 
     return {
-        "total_assets": total_assets,
+        "total_assets": kpis[0] or 0,
+        "kpi_assets": kpis[1] or 0,
+        "pq_assets": kpis[2] or 0,
         "status_breakdown": status_breakdown,
-        "timeline": timeline
+        "service_breakdown": service_breakdown,
+        "timeline": timeline[-16:],  # Get the most recent 16 weeks
+        "timeline_services": list(services_set)
     }
