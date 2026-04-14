@@ -14,7 +14,7 @@ def get_markets(current_user: dict = Depends(get_current_user), cursor = Depends
     if current_user.get('role') == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot access market data.")
 
-    cursor.execute("SELECT id, code, name, language, region, is_active, description, created_at FROM markets ORDER BY region, name")
+    cursor.execute("SELECT id, code, name, language, region, is_active, description, created_at FROM markets ORDER BY code")
     rows = cursor.fetchall()
 
     markets = []
