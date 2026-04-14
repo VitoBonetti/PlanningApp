@@ -22,7 +22,7 @@ class ConnectionManager:
 
     async def broadcast(self, message: str):
         # if a change happens, send a message to all connected browsers
-        for connection in self.active_connections.keys():
+        for connection in list(self.active_connections.keys()):
             try:
                 await connection.send_text(message)
             except:
