@@ -9,7 +9,7 @@ from routers import (
     market_contacts, intake,
     intake_luigi, services
 )
-from routers.auth import require_admin
+from routers.auth import require_admin, verify_iap_jwt
 from websockets_manager import manager
 from services.importer import run_import_job
 from database import get_db_connection, init_db, db_cursor_context
@@ -154,10 +154,10 @@ async def websocket_endpoint(websocket: WebSocket):
     # Accept the connection first
     await websocket.accept()
 
-    # Read the secure header attached by Google IAP during the WebSocket upgrade
-    iap_header = websocket.headers.get("x-goog-authenticated-user-email")
+    # Read the secure JWT header attached by Google IAP
+    iap_jwt = websocket.headers.get("x-goog-iap-jwt-assertion")
     
-    if not iap_header:
+    if not iap_jwt:
         # Fallback for local laptop testing
         if os.environ.get("ENV") == "local":
             username = os.environ.get("MASTER_ADMIN_EMAIL").lower()
@@ -165,8 +165,12 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=1008, reason="Unauthorized: Missing IAP identity header")
             return
     else:
-        # Extract the email from the IAP header
-        username = iap_header.split(":")[-1].lower()
+        try:
+            # Extract and verify the email mathematically from the JWT
+            username = verify_iap_jwt(iap_jwt)
+        except ValueError as e:
+            await websocket.close(code=1008, reason=f"Unauthorized: {str(e)}")
+            return
 
     # Connect to the Websocket Manager
     await manager.connect(websocket, username)
