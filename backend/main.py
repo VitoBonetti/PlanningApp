@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, BackgroundTasks, HTTPException, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
@@ -12,7 +12,6 @@ from audit_logger import init_audit_log_infrastructure
 import os
 from contextlib import asynccontextmanager
 import asyncio
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from services.drive_manager import DriveManager
 
 
@@ -49,21 +48,7 @@ async def lifespan(app: FastAPI):
     # nitialize BigQuery Audit Logs
     init_audit_log_infrastructure()
 
-    # Start the clock when the server spins up
-    scheduler = AsyncIOScheduler()
-    
-    # Schedule it for 2:00 AM every day
-    # You can easily test it by changing it to (trigger='interval', minutes=5)
-    scheduler.add_job(scheduled_sync_job, 'cron', hour=11, minute=0)
-    # scheduler.add_job(scheduled_sync_job, 'interval', minutes=60)
-    
-    scheduler.start()
-    print("🕰️ Internal Background Scheduler started.")
-    
     yield # The app runs here
-    
-    # Shut down the clock cleanly when the server restarts
-    scheduler.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -174,6 +159,28 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
+
+
+@app.post("/api/system/trigger-sync", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_sync(
+        background_tasks: BackgroundTasks,
+        x_cloudscheduler: str = Header(default=None)
+):
+    """
+    Secure endpoint triggered once daily by Google Cloud Scheduler.
+    Runs the heavy DB/Drive sync in the background to avoid timeouts.
+    """
+    # Security: Ensure this request actually originated from Google Cloud Scheduler
+    if not x_cloudscheduler and os.environ.get("ENV") != "local":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized: Missing X-CloudScheduler header"
+        )
+
+    # Fire and forget the background job
+    background_tasks.add_task(scheduled_sync_job)
+
+    return {"message": "Sync job accepted and running in the background."}
 
 
 @app.get("/api/system/version")
