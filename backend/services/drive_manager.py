@@ -1,11 +1,11 @@
 import os
 import google.auth
 from googleapiclient.discovery import build
-from backend.database import db_cursor_context
+from database import db_cursor_context
 import uuid
 from datetime import datetime
 import asyncio
-from backend.websockets_manager import manager
+from websockets_manager import manager
 
 
 class DriveManager:

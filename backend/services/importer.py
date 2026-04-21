@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 import requests
 from datetime import datetime
 import uuid
-from backend.database import db_cursor_context
+from database import db_cursor_context
 
 
 # ==========================================

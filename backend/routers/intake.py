@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from google.cloud import storage, pubsub_v1
 import json
 from PIL import Image
-from backend.database import get_db_cursor
-from backend.routers.auth import require_admin
+from database import get_db_cursor
+from routers.auth import require_admin
 
 router = APIRouter(tags=["Intake"])
 

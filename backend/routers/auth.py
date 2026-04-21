@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Request, BackgroundTasks
 import os
 import uuid
-from backend.database import get_db_cursor
-from backend.audit_logger import log_audit_event
-from backend.websockets_manager import manager
+from database import get_db_cursor
+from audit_logger import log_audit_event
+from websockets_manager import manager
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from google.oauth2 import id_token

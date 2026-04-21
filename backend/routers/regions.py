@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import uuid
-from backend.database import get_db_cursor
-from backend.routers.auth import get_current_user, require_admin
-from backend.models import RegionSchema
+from database import get_db_cursor
+from routers.auth import get_current_user, require_admin
+from models import RegionSchema
 
 router = APIRouter(tags=["Regions"])
 

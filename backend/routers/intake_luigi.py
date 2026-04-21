@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from pydantic import BaseModel
 from google.oauth2 import id_token
 from google.auth.transport import requests
-from backend.database import get_db_cursor
-from backend.models import LuigiIntakeResult
-from backend.routers.board import get_user_provision_internal
+from database import get_db_cursor
+from models import LuigiIntakeResult
+from routers.board import get_user_provision_internal
 
 SA_EMAIL = os.environ.get("SA_EMAIL")
 

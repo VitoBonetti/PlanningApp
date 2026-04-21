@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
-from backend.database import get_db_cursor
-from backend.routers.auth import require_admin
-from backend.models import ServiceUpdate
+from database import get_db_cursor
+from routers.auth import require_admin
+from models import ServiceUpdate
 
 router = APIRouter(tags=["Services"])
 

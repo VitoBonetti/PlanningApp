@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 import uuid
-from backend.database import get_db_cursor
-from backend.routers.auth import get_current_user, require_admin
-from backend.models import UserCreateSecure, UserUpdate
-from backend.websockets_manager import manager
-from backend.audit_logger import log_audit_event, fetch_recent_audit_logs
+from database import get_db_cursor
+from routers.auth import get_current_user, require_admin
+from models import UserCreateSecure, UserUpdate
+from websockets_manager import manager
+from audit_logger import log_audit_event, fetch_recent_audit_logs
 from datetime import datetime
 
 router = APIRouter(tags=["Users"])

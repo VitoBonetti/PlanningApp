@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from typing import List
 import uuid
 import json
-from backend.database import get_db_cursor, db_cursor_context
-from backend.routers.auth import get_current_user, require_admin, limiter
-from backend.routers.board import get_user_provision_internal
-from backend.models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
-from backend.websockets_manager import manager
-from backend.audit_logger import log_audit_event
-from backend.services.drive_manager import background_provision_workspace, background_archive_workspace, background_relocate_workspace
+from database import get_db_cursor, db_cursor_context
+from routers.auth import get_current_user, require_admin, limiter
+from routers.board import get_user_provision_internal
+from models import TestCreate, TestUpdate, TestSchedule, BulkTestCreate, AssignmentCreate
+from websockets_manager import manager
+from audit_logger import log_audit_event
+from services.drive_manager import background_provision_workspace, background_archive_workspace, background_relocate_workspace
 
 router = APIRouter(tags=["Tests & Assignments"])
 

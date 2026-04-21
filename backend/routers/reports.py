@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
-from backend.database import get_db_cursor, db_cursor_context
-from backend.routers.auth import get_current_user, require_admin
-from backend.services.drive_manager import DriveManager
+from database import get_db_cursor, db_cursor_context
+from routers.auth import get_current_user, require_admin
+from services.drive_manager import DriveManager
 
 router = APIRouter(tags=["Reports & Documents"])
 

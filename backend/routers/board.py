@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request, Response
 import uuid
 from datetime import datetime, timedelta
-from backend.database import get_db_connection
-from backend.routers.auth import get_current_user, require_admin, require_write_access, limiter
-from backend.models import EventCreate, EventUpdate, WhiteboxCategoryCreate, WhiteboxCategoryUpdate
-from backend.websockets_manager import manager
-from backend.audit_logger import log_audit_event
+from database import get_db_connection
+from routers.auth import get_current_user, require_admin, require_write_access, limiter
+from models import EventCreate, EventUpdate, WhiteboxCategoryCreate, WhiteboxCategoryUpdate
+from websockets_manager import manager
+from audit_logger import log_audit_event
 
 router = APIRouter(tags=["Board & Events"])
 

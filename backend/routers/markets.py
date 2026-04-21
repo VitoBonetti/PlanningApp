@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from backend.models import MarketCreate, MarketUpdate
+from models import MarketCreate, MarketUpdate
 import uuid
-from backend.database import get_db_cursor
-from backend.routers.auth import get_current_user, require_admin
+from database import get_db_cursor
+from routers.auth import get_current_user, require_admin
 
 router = APIRouter(tags=["Markets"])
 

@@ -2,18 +2,18 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
-from backend.routers import board, intake_luigi, markets, assets, tests, intake, services, auth, users, reports, \
+from routers import board, intake_luigi, markets, assets, tests, intake, services, auth, users, reports, \
     regions, market_contacts
-from backend.routers.auth import require_admin, verify_iap_jwt
+from routers.auth import require_admin, verify_iap_jwt
 from websockets_manager import manager
-from backend.services.importer import run_import_job
-from backend.database import get_db_connection, init_db
-from backend.audit_logger import init_audit_log_infrastructure
+from services.importer import run_import_job
+from database import get_db_connection, init_db
+from audit_logger import init_audit_log_infrastructure
 import os
 from contextlib import asynccontextmanager
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from backend.services.drive_manager import DriveManager
+from services.drive_manager import DriveManager
 
 
 async def scheduled_sync_job():
@@ -101,7 +101,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     
     # 2. Log it to your BigQuery / Audit DB as the "SYSTEM" user
     try:
-        from backend.audit_logger import log_audit_event
+        from audit_logger import log_audit_event
         log_audit_event(
             user_id="SYSTEM",
             username="system@server",

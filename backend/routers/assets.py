@@ -2,16 +2,16 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Backgro
 import pandas as pd
 import io
 import uuid
-from backend.database import get_db_cursor, db_cursor_context
-from backend.routers.auth import get_current_user, require_admin, limiter
-from backend.audit_logger import log_audit_event
-from backend.websockets_manager import manager
+from database import get_db_cursor, db_cursor_context
+from routers.auth import get_current_user, require_admin, limiter
+from audit_logger import log_audit_event
+from websockets_manager import manager
 import google.auth
 from googleapiclient.discovery import build
 from datetime import datetime
 import os
-from backend.models import AssetTrackingUpdate
-from backend.services.importer import run_import_job
+from models import AssetTrackingUpdate
+from services.importer import run_import_job
 from typing import Optional
 
 router = APIRouter(tags=["Assets"])
