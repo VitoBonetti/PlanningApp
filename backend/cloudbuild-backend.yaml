@@ -1,0 +1,50 @@
+steps:
+  # 1. Build the Docker Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/gcp-backend:$COMMIT_SHA'
+      - '.'
+
+  # 2. Push the Docker Image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/gcp-backend:$COMMIT_SHA'
+
+  # 3. Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'gcp-backend'
+      - '--image'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/gcp-backend:$COMMIT_SHA'
+      - '--region'
+      - 'europe-west1'
+      - '--allow-unauthenticated'
+      - '--service-account'
+      - 'gcp-backend-sa@gostcontrolpanel.iam.gserviceaccount.com'
+      - '--network'
+      - 'gcp-vpc'
+      - '--subnet'
+      - 'gcp-vpc-subnet'
+      - '--vpc-egress'
+      - 'private-ranges-only'
+      - '--no-cpu-throttling'
+      - '--min-instances'
+      - '1'
+      # Safely load the static variables from the new file
+      - '--env-vars-file'
+      - 'env.yaml'
+      # Keep the dynamic variables injected by Cloud Build
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,COMMIT_SHA=$SHORT_SHA,BRANCH_NAME=$BRANCH_NAME,BUILD_ID=$BUILD_ID,REPO_NAME=$REPO_NAME'
+
+images:
+  - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/gcp-backend:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
