@@ -1,6 +1,7 @@
 steps:
   # 1. Build the Docker Image
   - name: 'gcr.io/cloud-builders/docker'
+    dir: 'backend'
     args:
       - 'build'
       - '-t'
@@ -15,6 +16,7 @@ steps:
 
   # 3. Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    dir: 'backend'
     entrypoint: gcloud
     args:
       - 'run'
