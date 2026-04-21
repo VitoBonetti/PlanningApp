@@ -14,6 +14,19 @@ steps:
       - 'push'
       - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/gcp-backend:$COMMIT_SHA'
 
+  # 3. Dynamically append Cloud Build variables to our clean YAML file
+  - name: 'ubuntu'
+    dir: 'backend'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "GCP_PROJECT_ID: '$PROJECT_ID'" >> env.yaml
+        echo "COMMIT_SHA: '$SHORT_SHA'" >> env.yaml
+        echo "BRANCH_NAME: '$BRANCH_NAME'" >> env.yaml
+        echo "BUILD_ID: '$BUILD_ID'" >> env.yaml
+        echo "REPO_NAME: '$REPO_NAME'" >> env.yaml
+
   # 3. Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     dir: 'backend'
@@ -41,9 +54,6 @@ steps:
       # Safely load the static variables from the new file
       - '--env-vars-file'
       - 'env.yaml'
-      # Keep the dynamic variables injected by Cloud Build
-      - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID,COMMIT_SHA=$SHORT_SHA,BRANCH_NAME=$BRANCH_NAME,BUILD_ID=$BUILD_ID,REPO_NAME=$REPO_NAME'
 
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/gcp-repo/gcp-backend:$COMMIT_SHA'
