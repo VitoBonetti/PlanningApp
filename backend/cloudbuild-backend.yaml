@@ -21,6 +21,7 @@ steps:
     args:
       - '-c'
       - |
+        echo "" >> env.yaml
         echo "GCP_PROJECT_ID: '$PROJECT_ID'" >> env.yaml
         echo "COMMIT_SHA: '$SHORT_SHA'" >> env.yaml
         echo "BRANCH_NAME: '$BRANCH_NAME'" >> env.yaml
