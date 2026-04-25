@@ -1,19 +1,42 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    Request,
+    Depends,
+    HTTPException
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
-from routers import board, intake_luigi, markets, assets, tests, intake, services, auth, users, reports, \
-    regions, market_contacts
+from routers import (
+    board,
+    intake_luigi,
+    markets,
+    assets,
+    tests,
+    intake,
+    services,
+    auth,
+    users,
+    reports,
+    regions,
+    market_contacts
+)
+from models import RollbackRequest
 from routers.auth import require_admin, verify_iap_jwt
 from websockets_manager import manager
 from services.importer import run_import_job
-from database import get_db_connection, run_alembic_migrations
+from database import get_db_connection, run_alembic_migrations, get_db_cursor
 from audit_logger import init_audit_log_infrastructure
 import os
 from contextlib import asynccontextmanager
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from services.drive_manager import DriveManager
+from alembic.config import Config
+from alembic import command
+from alembic.script import ScriptDirectory
 
 
 async def scheduled_sync_job():
@@ -185,3 +208,64 @@ def get_system_version(current_user: dict = Depends(require_admin)):
         "build_id": os.environ.get("BUILD_ID", "untracked-local-build"),
         "repo_name": os.environ.get("REPO_NAME", "local-repo")
     }
+
+
+@app.get("/api/system/migrations", tags=["System"])
+def list_migrations(cursor=Depends(get_db_cursor), current_user: dict = Depends(require_admin)):
+    """
+    Returns a timeline of all database migrations and highlights the current active version.
+    """
+    try:
+        # 1. Get the current active version from the live database
+        cursor.execute("SELECT version_num FROM alembic_version")
+        result = cursor.fetchone()
+        current_version = result[0] if result else None
+
+        # 2. Read the available migration files from the Alembic folder
+        alembic_cfg_path = os.path.join(os.path.dirname(__file__), "alembic.ini")
+        alembic_cfg = Config(alembic_cfg_path)
+        script = ScriptDirectory.from_config(alembic_cfg)
+
+        migrations = []
+
+        # walk_revisions() goes from newest to oldest
+        for rev in script.walk_revisions():
+            migrations.append({
+                "revision_id": rev.revision,
+                "message": rev.doc,
+                "is_current_active": rev.revision == current_version
+            })
+
+        return {
+            "current_db_version": current_version,
+            "history": migrations
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch migrations: {str(e)}")
+
+
+@app.post("/api/system/rollback-db", tags=["System"])
+def rollback_database(request: RollbackRequest, current_user: dict = Depends(require_admin)):
+    """
+    EMERGENCY ADMIN ACTION: Rolls the database back to a specific revision ID.
+    Example payload: {"target_revision": "0001_baseline"}
+    """
+    target = request.target_revision
+    print(f"🚨 ADMIN {current_user['username']} INITIATED DB ROLLBACK TO {target}")
+
+    try:
+        alembic_cfg_path = os.path.join(os.path.dirname(__file__), "alembic.ini")
+        alembic_cfg = Config(alembic_cfg_path)
+
+        # Execute the downgrade command to the specific target ID
+        command.downgrade(alembic_cfg, target)
+
+        return {
+            "status": "success",
+            "message": f"Successfully rolled back database to version {target}."
+        }
+
+    except Exception as e:
+        print(f"🚨 Rollback Failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {str(e)}")

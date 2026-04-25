@@ -176,3 +176,6 @@ class ServiceUpdate(BaseModel):
     name: str
     max_concurrent_per_week: int
 
+
+class RollbackRequest(BaseModel):
+    target_revision: str
