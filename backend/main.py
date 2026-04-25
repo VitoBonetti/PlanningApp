@@ -7,7 +7,7 @@ from routers import board, intake_luigi, markets, assets, tests, intake, service
 from routers.auth import require_admin, verify_iap_jwt
 from websockets_manager import manager
 from services.importer import run_import_job
-from database import get_db_connection, init_db
+from database import get_db_connection, run_alembic_migrations
 from audit_logger import init_audit_log_infrastructure
 import os
 from contextlib import asynccontextmanager
@@ -36,7 +36,7 @@ async def scheduled_sync_job():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize Database Tables
-    init_db()
+    run_alembic_migrations()
 
     # Check Database Connection
     conn = get_db_connection()

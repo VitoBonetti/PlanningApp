@@ -1,2 +1,0 @@
-ALTER TABLE users DROP COLUMN IF EXISTS hashed_password;
-ALTER TABLE users DROP COLUMN IF EXISTS session_token;
